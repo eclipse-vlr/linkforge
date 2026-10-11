@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
-	"sync"
+	"time"
 )
 
 type CreateLinkRequest struct {
@@ -22,30 +25,9 @@ type CreateLinkResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
-type LinkStore struct {
-	mu    sync.RWMutex
-	links map[string]string
-}
-
-func NewLinkStore() *LinkStore {
-	return &LinkStore{
-		links: make(map[string]string),
-	}
-}
-
-func (s *LinkStore) Save(code, url string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.links[code] = url
-}
-
-func (s *LinkStore) Get(code string) (string, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	url, ok := s.links[code]
-	return url, ok
+type LinkRepository interface {
+	Save(ctx context.Context, code, originalURL string) error
+	Get(ctx context.Context, code string) (string, error)
 }
 
 func generateCode() (string, error) {
@@ -88,7 +70,7 @@ func validateURL(raw string) error {
 	return nil
 }
 
-func newRouter(store *LinkStore) http.Handler {
+func newRouter(store LinkRepository) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -127,14 +109,53 @@ func newRouter(store *LinkStore) http.Handler {
 			return
 		}
 
-		code, err := generateCode()
-		if err != nil {
-			log.Printf("failed to generate code: %v", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		var code string
+
+		const maxAttempts = 5
+
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			var err error
+
+			code, err = generateCode()
+			if err != nil {
+				log.Printf("failed to generate code: %v", err)
+				http.Error(
+					w,
+					"internal server error",
+					http.StatusInternalServerError,
+				)
+				return
+			}
+
+			err = store.Save(ctx, code, req.URL)
+			if err == nil {
+				break
+			}
+
+			if errors.Is(err, ErrCodeConflict) {
+				continue
+			}
+
+			log.Printf("failed to save link: %v", err)
+			http.Error(
+				w,
+				"internal server error",
+				http.StatusInternalServerError,
+			)
 			return
 		}
 
-		store.Save(code, req.URL)
+		if code == "" {
+			http.Error(
+				w,
+				"failed to generate unique code",
+				http.StatusInternalServerError,
+			)
+			return
+		}
 
 		response := CreateLinkResponse{
 			Code:        code,
@@ -163,9 +184,18 @@ func newRouter(store *LinkStore) http.Handler {
 			return
 		}
 
-		originalURL, ok := store.Get(code)
-		if !ok {
-			http.NotFound(w, r)
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		originalURL, err := store.Get(ctx, code)
+		if err != nil {
+			if err == ErrLinkNotFound {
+				http.NotFound(w, r)
+				return
+			}
+
+			log.Printf("failed to get link: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
@@ -176,7 +206,19 @@ func newRouter(store *LinkStore) http.Handler {
 }
 
 func main() {
-	store := NewLinkStore()
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		connString = "postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	store, err := NewPostgresStore(ctx, connString)
+	if err != nil {
+		log.Fatalf("failed to connect to PostgreSQL: %v", err)
+	}
+	defer store.Close()
 
 	log.Println("LinkForge started on :8080")
 	if err := http.ListenAndServe(":8080", newRouter(store)); err != nil {

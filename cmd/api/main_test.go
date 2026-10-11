@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +10,7 @@ import (
 )
 
 func TestHealthz(t *testing.T) {
-	req := httptest.NewRequest(
-		http.MethodGet,
-		"/healthz",
-		nil,
-	)
-
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
 	newRouter(NewLinkStore()).ServeHTTP(rec, req)
@@ -28,7 +24,6 @@ func TestHealthz(t *testing.T) {
 	}
 
 	var body map[string]string
-
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
@@ -36,17 +31,12 @@ func TestHealthz(t *testing.T) {
 	if body["status"] != "ok" {
 		t.Errorf("expected status ok, got %q", body["status"])
 	}
-
 }
 
 func TestHealthzMethodNotAllowed(t *testing.T) {
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/healthz",
-		nil,
-	)
-
+	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 	rec := httptest.NewRecorder()
+
 	newRouter(NewLinkStore()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusMethodNotAllowed {
@@ -55,13 +45,9 @@ func TestHealthzMethodNotAllowed(t *testing.T) {
 }
 
 func TestUnknownRoute(t *testing.T) {
-	req := httptest.NewRequest(
-		http.MethodGet,
-		"/unknown",
-		nil,
-	)
-
+	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	rec := httptest.NewRecorder()
+
 	newRouter(NewLinkStore()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
@@ -104,13 +90,17 @@ func TestCreateLink(t *testing.T) {
 		t.Errorf("unexpected short URL: %q", response.ShortURL)
 	}
 
-	savedURL, ok := store.Get(response.Code)
-	if !ok {
-		t.Fatal("created link was not saved")
+	savedURL, err := store.Get(context.Background(), response.Code)
+	if err != nil {
+		t.Fatalf("created link was not saved: %v", err)
 	}
 
 	if savedURL != response.OriginalURL {
-		t.Errorf("stored URL %q does not match response URL %q", savedURL, response.OriginalURL)
+		t.Errorf(
+			"stored URL %q does not match response URL %q",
+			savedURL,
+			response.OriginalURL,
+		)
 	}
 }
 
@@ -133,16 +123,18 @@ func TestCreateLinkRejectsEmptyURL(t *testing.T) {
 
 func TestRedirectToOriginalURL(t *testing.T) {
 	store := NewLinkStore()
-	store.Save("abc12345", "https://example.com/article")
+
+	if err := store.Save(
+		context.Background(),
+		"abc12345",
+		"https://example.com/article",
+	); err != nil {
+		t.Fatalf("failed to save test link: %v", err)
+	}
 
 	handler := newRouter(store)
 
-	req := httptest.NewRequest(
-		http.MethodGet,
-		"/abc12345",
-		nil,
-	)
-
+	req := httptest.NewRequest(http.MethodGet, "/abc12345", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -158,12 +150,7 @@ func TestRedirectToOriginalURL(t *testing.T) {
 func TestRedirectUnknownCode(t *testing.T) {
 	handler := newRouter(NewLinkStore())
 
-	req := httptest.NewRequest(
-		http.MethodGet,
-		"/unknown1",
-		nil,
-	)
-
+	req := httptest.NewRequest(http.MethodGet, "/unknown1", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -210,8 +197,12 @@ func TestValidateURL(t *testing.T) {
 			err := validateURL(tt.url)
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateURL(%q) error = %v, wantErr %v",
-					tt.url, err, tt.wantErr)
+				t.Errorf(
+					"validateURL(%q) error = %v, wantErr %v",
+					tt.url,
+					err,
+					tt.wantErr,
+				)
 			}
 		})
 	}
@@ -233,6 +224,9 @@ func TestCreateLinkRejectsInvalidURL(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected status 400, got %d", rec.Code)
 	}
+
+	store.mu.RLock()
+	defer store.mu.RUnlock()
 
 	if len(store.links) != 0 {
 		t.Errorf("expected no links to be saved, got %d", len(store.links))
