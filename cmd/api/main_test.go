@@ -171,3 +171,70 @@ func TestRedirectUnknownCode(t *testing.T) {
 		t.Errorf("expected status 404, got %d", rec.Code)
 	}
 }
+
+func TestValidateURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{
+			name:    "valid HTTPS URL",
+			url:     "https://example.com/article",
+			wantErr: false,
+		},
+		{
+			name:    "valid HTTP URL",
+			url:     "http://localhost:8080/page",
+			wantErr: false,
+		},
+		{
+			name:    "missing scheme",
+			url:     "example.com",
+			wantErr: true,
+		},
+		{
+			name:    "unsupported scheme",
+			url:     "ftp://example.com",
+			wantErr: true,
+		},
+		{
+			name:    "missing hostname",
+			url:     "https:///article",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateURL(tt.url)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateURL(%q) error = %v, wantErr %v",
+					tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCreateLinkRejectsInvalidURL(t *testing.T) {
+	store := NewLinkStore()
+	handler := newRouter(store)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/links",
+		strings.NewReader(`{"url":"ftp://example.com"}`),
+	)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	if len(store.links) != 0 {
+		t.Errorf("expected no links to be saved, got %d", len(store.links))
+	}
+}

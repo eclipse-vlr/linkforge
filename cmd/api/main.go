@@ -3,9 +3,11 @@ package main
 import (
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 )
@@ -65,6 +67,27 @@ func generateCode() (string, error) {
 	return code.String(), nil
 }
 
+func validateURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+
+	if !parsed.IsAbs() {
+		return fmt.Errorf("URL must be absolute")
+	}
+
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("only http and https schemes are allowed")
+	}
+
+	if parsed.Host == "" || parsed.Hostname() == "" {
+		return fmt.Errorf("URL must contain a hostname")
+	}
+
+	return nil
+}
+
 func newRouter(store *LinkStore) http.Handler {
 	mux := http.NewServeMux()
 
@@ -93,8 +116,14 @@ func newRouter(store *LinkStore) http.Handler {
 		}
 
 		req.URL = strings.TrimSpace(req.URL)
+
 		if req.URL == "" {
 			http.Error(w, "url is required", http.StatusBadRequest)
+			return
+		}
+
+		if err := validateURL(req.URL); err != nil {
+			http.Error(w, "invalid URL: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
