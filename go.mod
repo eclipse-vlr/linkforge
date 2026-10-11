@@ -1,4 +1,4 @@
-module github.com/YOUR_USERNAME/linkforge
+module github.com/eclipse-vlr/linkforge
 
 go 1.27.2
 
