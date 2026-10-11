@@ -121,6 +121,28 @@ func newRouter(store *LinkStore) http.Handler {
 		}
 	})
 
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		code := strings.TrimPrefix(r.URL.Path, "/")
+
+		if code == "" || strings.Contains(code, "/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		originalURL, ok := store.Get(code)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+
+		http.Redirect(w, r, originalURL, http.StatusFound)
+	})
+
 	return mux
 }
 

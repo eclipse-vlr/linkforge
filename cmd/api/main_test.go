@@ -130,3 +130,44 @@ func TestCreateLinkRejectsEmptyURL(t *testing.T) {
 		t.Errorf("expected status 400, got %d", rec.Code)
 	}
 }
+
+func TestRedirectToOriginalURL(t *testing.T) {
+	store := NewLinkStore()
+	store.Save("abc12345", "https://example.com/article")
+
+	handler := newRouter(store)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/abc12345",
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rec.Code)
+	}
+
+	if got := rec.Header().Get("Location"); got != "https://example.com/article" {
+		t.Errorf("unexpected Location header: %q", got)
+	}
+}
+
+func TestRedirectUnknownCode(t *testing.T) {
+	handler := newRouter(NewLinkStore())
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/unknown1",
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", rec.Code)
+	}
+}
