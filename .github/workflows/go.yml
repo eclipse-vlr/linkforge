@@ -15,6 +15,24 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: linkforge
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: linkforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linkforge -d linkforge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -33,3 +51,32 @@ jobs:
 
       - name: Run go vet
         run: go vet ./...
+
+      - name: Test migrations and API
+        shell: bash
+        run: |
+          go run ./cmd/api > server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8080/healthz; then
+              break
+            fi
+
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              cat server.log
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          curl -fsS http://localhost:8080/healthz
+
+          curl -fsS \
+            -X POST http://localhost:8080/api/v1/links \
+            -H "Content-Type: application/json" \
+            -d '{"url":"https://example.com"}'
+
+          cat server.log
