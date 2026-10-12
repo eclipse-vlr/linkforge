@@ -209,6 +209,11 @@ func main() {
 		connString = "postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable"
 	}
 
+	if err := runMigrations(connString); err != nil {
+		log.Fatalf("failed to run migrations: %v", err)
+	}
+	log.Println("Database migrations applied successfully")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

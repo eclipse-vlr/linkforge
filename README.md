@@ -140,11 +140,20 @@ docker compose ps
 
 ### 3. Create the database table
 
-The application expects a `links` table in PostgreSQL. If the table has not been created yet, execute:
+LinkForge uses [golang-migrate](https://github.com/golang-migrate/migrate) to manage PostgreSQL schema changes.
 
-```powershell
-docker exec -i linkforge-postgres psql -U linkforge -d linkforge -c "CREATE TABLE IF NOT EXISTS links (id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY, code VARCHAR(16) UNIQUE NOT NULL, original_url TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());"
-```
+SQL migration files are stored in the `migrations/` directory:
+
+- `000001_create_links_table.up.sql` — creates the `links` table.
+- `000001_create_links_table.down.sql` — removes the `links` table.
+
+Migrations are applied automatically when the application starts.
+
+On the first startup, LinkForge creates the required database tables. On subsequent startups, previously applied migrations are skipped.
+
+No manual database initialization is required.
+
+**Note:** Down migrations may delete existing data and should be used with caution.
 
 ### 4. Start the application
 
@@ -156,6 +165,17 @@ go run ./cmd/api
 ```
 
 The HTTP server starts on port `8080`.
+
+The application applies pending database migrations before starting the HTTP server.
+
+Expected startup output:
+
+```text
+Database migrations applied successfully
+LinkForge started on :8080
+```
+
+Run the application from the repository root because migration files are currently loaded using a relative path.
 
 ### 5. Test the API
 
@@ -201,6 +221,18 @@ The `links` table stores the original URL, its short code, and the creation time
 | `created_at` | `TIMESTAMPTZ` | Creation timestamp |
 
 The unique constraint on `code` prevents duplicate short codes from being stored.
+
+
+### Migration versioning
+
+Migration history is tracked in the `schema_migrations` table.
+
+Each migration has a version number and can contain two SQL scripts:
+
+- `up` applies a schema change.
+- `down` reverts a schema change.
+
+The migration system ensures that already applied migrations are not executed again.
 
 ## Configuration
 
