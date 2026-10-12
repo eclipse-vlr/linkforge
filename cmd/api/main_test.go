@@ -232,3 +232,49 @@ func TestCreateLinkRejectsInvalidURL(t *testing.T) {
 		t.Errorf("expected no links to be saved, got %d", len(store.links))
 	}
 }
+
+type conflictLinkRepository struct {
+	saveCalls int
+}
+
+func (s *conflictLinkRepository) Save(
+	ctx context.Context,
+	code string,
+	originalURL string,
+) error {
+	s.saveCalls++
+	return ErrCodeConflict
+}
+
+func (s *conflictLinkRepository) Get(
+	ctx context.Context,
+	code string,
+) (string, error) {
+	return "", ErrLinkNotFound
+}
+
+func TestCreateLinkReturnsErrorAfterMaxConflicts(t *testing.T) {
+	store := &conflictLinkRepository{}
+	handler := newRouter(store)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/links",
+		strings.NewReader(`{"url":"https://example.com/article"}`),
+	)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf(
+			"expected status 500, got %d: %s",
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	if store.saveCalls != 5 {
+		t.Errorf("expected 5 save attempts, got %d", store.saveCalls)
+	}
+}

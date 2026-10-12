@@ -113,25 +113,22 @@ func newRouter(store LinkRepository) http.Handler {
 		defer cancel()
 
 		var code string
+		saved := false
 
 		const maxAttempts = 5
 
 		for attempt := 0; attempt < maxAttempts; attempt++ {
-			var err error
-
-			code, err = generateCode()
+			generatedCode, err := generateCode()
 			if err != nil {
 				log.Printf("failed to generate code: %v", err)
-				http.Error(
-					w,
-					"internal server error",
-					http.StatusInternalServerError,
-				)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
 
-			err = store.Save(ctx, code, req.URL)
+			err = store.Save(ctx, generatedCode, req.URL)
 			if err == nil {
+				code = generatedCode
+				saved = true
 				break
 			}
 
@@ -140,11 +137,12 @@ func newRouter(store LinkRepository) http.Handler {
 			}
 
 			log.Printf("failed to save link: %v", err)
-			http.Error(
-				w,
-				"internal server error",
-				http.StatusInternalServerError,
-			)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		if !saved {
+			http.Error(w, "failed to generate unique code", http.StatusInternalServerError)
 			return
 		}
 
@@ -189,7 +187,7 @@ func newRouter(store LinkRepository) http.Handler {
 
 		originalURL, err := store.Get(ctx, code)
 		if err != nil {
-			if err == ErrLinkNotFound {
+			if errors.Is(err, ErrLinkNotFound) {
 				http.NotFound(w, r)
 				return
 			}
