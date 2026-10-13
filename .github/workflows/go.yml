@@ -32,6 +32,7 @@ jobs:
 
     env:
       DATABASE_URL: postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable
+      TEST_DATABASE_URL: postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable
 
     steps:
       - name: Checkout repository
@@ -47,7 +48,7 @@ jobs:
         run: go mod download
 
       - name: Run tests
-        run: go test ./...
+        run: go test -count=1 -v ./...
 
       - name: Run go vet
         run: go vet ./...
