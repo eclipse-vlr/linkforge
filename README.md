@@ -101,6 +101,20 @@ Redirects to the original URL associated with the supplied code.
 
 A successful redirect returns `302 Found` and a `Location` header containing the original URL.
 
+### Link statistics
+
+`GET /api/v1/links/{code}/stats`
+
+Returns `200 OK` with the link code and redirect attempt count:
+
+```json
+{"code":"abc12345","click_count":12}
+```
+
+Unknown codes return `404`; reading statistics does not increment the counter.
+Statistics are public to anyone who knows the code. Repeated requests and bots
+are counted, and a redirect does not confirm arrival at the destination.
+
 ### Error responses
 
 | Status | Meaning |
@@ -149,6 +163,8 @@ SQL migration files are stored in the `migrations/` directory:
 
 - `000001_create_links_table.up.sql` — creates the `links` table.
 - `000001_create_links_table.down.sql` — removes the `links` table.
+- `000002_add_click_count.up.sql` — adds a click counter initialized to zero for existing and new links.
+- `000002_add_click_count.down.sql` — removes the counter and its accumulated statistics, preserving links.
 
 Migrations are applied automatically when the application starts.
 
@@ -218,6 +234,17 @@ Open the returned `short_url` in a browser to test the redirect.
 go test ./...
 ```
 
+To also test the statistics repository against a local PostgreSQL instance:
+
+```powershell
+$env:TEST_DATABASE_URL = "postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable"
+go test -count=1 ./...
+```
+
+The statistics test creates and removes an isolated schema and requires schema
+creation privileges. It checks migration rollback and concurrent increments.
+Without `TEST_DATABASE_URL`, this database test is skipped.
+
 ## Database schema
 
 The `links` table stores the original URL, its short code, and the creation timestamp.
@@ -228,8 +255,15 @@ The `links` table stores the original URL, its short code, and the creation time
 | `code` | `VARCHAR(16)` | Unique short code |
 | `original_url` | `TEXT` | Original URL |
 | `created_at` | `TIMESTAMPTZ` | Creation timestamp |
+| `click_count` | `BIGINT` | Click counter, defaults to zero |
 
 The unique constraint on `code` prevents duplicate short codes from being stored.
+
+Each GET request for an existing short code attempts to increment the counter
+before returning a redirect. Repeated requests and bots are counted; this does
+not confirm that the destination page was opened. Counter updates have a 500ms
+timeout. An update failure is logged and does not prevent the redirect, so counts
+may be lower during failures. Use `GET /api/v1/links/{code}/stats` to read the counter.
 
 
 ### Migration versioning

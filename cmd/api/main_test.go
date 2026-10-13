@@ -239,6 +239,14 @@ type conflictLinkRepository struct {
 	saveCalls int
 }
 
+func (s *conflictLinkRepository) GetStats(ctx context.Context, code string) (LinkStats, error) {
+	return LinkStats{}, ErrLinkNotFound
+}
+
+func (s *conflictLinkRepository) IncrementClicks(ctx context.Context, code string) error {
+	return ErrLinkNotFound
+}
+
 func (s *conflictLinkRepository) Save(
 	ctx context.Context,
 	code string,

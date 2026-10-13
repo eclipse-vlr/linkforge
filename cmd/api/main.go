@@ -31,6 +31,8 @@ type CreateLinkResponse struct {
 type LinkRepository interface {
 	Save(ctx context.Context, code, originalURL string) error
 	Get(ctx context.Context, code string) (string, error)
+	IncrementClicks(ctx context.Context, code string) error
+	GetStats(ctx context.Context, code string) (LinkStats, error)
 }
 
 func generateCode() (string, error) {
@@ -173,6 +175,30 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 		}
 	})
 
+	mux.HandleFunc("/api/v1/links/{code}/stats", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		stats, err := store.GetStats(ctx, r.PathValue("code"))
+		if err != nil {
+			if errors.Is(err, ErrLinkNotFound) {
+				http.NotFound(w, r)
+				return
+			}
+			logger.ErrorContext(r.Context(), "failed to get link stats", "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(stats); err != nil {
+			logger.ErrorContext(r.Context(), "failed to write stats response", "error", err)
+		}
+	})
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -199,6 +225,13 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 			logger.ErrorContext(r.Context(), "failed to get link", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
+		}
+
+		statsCtx, cancelStats := context.WithTimeout(r.Context(), 500*time.Millisecond)
+		err = store.IncrementClicks(statsCtx, code)
+		cancelStats()
+		if err != nil {
+			logger.ErrorContext(r.Context(), "failed to increment link clicks", "code", code, "error", err)
 		}
 
 		http.Redirect(w, r, originalURL, http.StatusFound)
