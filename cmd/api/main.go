@@ -269,6 +269,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 	defer store.Close()
+	var repository LinkRepository = store
 
 	if cfg.RedisURL != "" {
 		redisClient, err := newRedisClient(cfg.RedisURL, cfg.RedisTimeout)
@@ -284,9 +285,13 @@ func run(logger *slog.Logger) error {
 		} else {
 			logger.Info("Redis connection ready")
 		}
+		repository = &CachedLinkRepository{
+			LinkRepository: store, cache: &RedisLinkCache{client: redisClient},
+			logger: logger, ttl: cfg.RedisCacheTTL, timeout: cfg.RedisTimeout,
+		}
 	}
 
-	handler := loggingMiddleware(logger, newRouter(store, logger, cfg.BaseURL))
+	handler := loggingMiddleware(logger, newRouter(repository, logger, cfg.BaseURL))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler}
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
