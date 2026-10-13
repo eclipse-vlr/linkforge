@@ -92,6 +92,9 @@ Example response (`201 Created`):
 The generated code in this example is illustrative; each request can produce a different code.
 
 Only absolute HTTP and HTTPS URLs are accepted.
+The JSON body is limited to 16 KiB (`413` if exceeded), and the trimmed URL
+to 4096 bytes (`400` if exceeded). The body must contain exactly one JSON object;
+unknown fields, extra JSON values, and trailing non-whitespace data return `400`.
 
 ### Redirect to the original URL
 
@@ -124,6 +127,7 @@ are counted, and a redirect does not confirm arrival at the destination.
 | `400 Bad Request` | Invalid JSON or URL |
 | `404 Not Found` | Short code does not exist |
 | `405 Method Not Allowed` | Unsupported HTTP method |
+| `413 Content Too Large` | Request body exceeds 16 KiB |
 | `500 Internal Server Error` | Internal or storage error |
 
 ## Getting started
@@ -167,6 +171,11 @@ SQL migration files are stored in the `migrations/` directory:
 - `000002_add_click_count.down.sql` — removes the counter and its accumulated statistics, preserving links.
 
 Migrations are applied automatically when the application starts.
+Startup migrations have a total 30-second deadline, including connecting,
+authentication, waiting for locks, and running SQL. Ctrl+C/SIGTERM also cancels
+this work by closing migration connections. A timeout or cancellation stops
+startup. If a migration was interrupted after being marked dirty, inspect the
+schema and migration history before repairing it; LinkForge never forces a version.
 
 On the first startup, LinkForge creates the required database tables. On subsequent startups, previously applied migrations are skipped.
 
@@ -184,6 +193,8 @@ go run ./cmd/api
 ```
 
 The HTTP server starts on port `8080`.
+It allows 5 seconds for request headers, 10 seconds for the entire request read,
+15 seconds for response writes, and 60 seconds for idle keep-alive connections.
 
 The application applies pending database migrations before starting the HTTP server.
 
@@ -309,7 +320,17 @@ $env:SHUTDOWN_TIMEOUT = "15s"
 go run ./cmd/api
 ```
 
-The default credentials are intended for local development only. Use appropriate secrets and database security settings in a deployed environment.
+The Compose setup is for local development: PostgreSQL and Redis ports bind only
+to `127.0.0.1`. After changing a port binding, run `docker compose up -d db` to
+recreate the container with the new binding; the database volume is retained.
+The default credentials are intended for local development only. The Compose
+PostgreSQL user is an initialization superuser. For deployment, use private
+database networking, unique secrets and a dedicated non-superuser application
+role; run schema migrations separately with a role permitted to change the schema.
+Do not deploy the local Compose credentials or superuser application connection.
+
+CI checks reachable dependency vulnerabilities with `govulncheck`. To run the
+same check locally: `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`.
 
 ### Redis connection setup
 
@@ -360,7 +381,6 @@ linkforge/
 - Add request IDs to correlate HTTP request logs and errors
 - Add integration tests using PostgreSQL
 - Add GitHub Actions for automated testing
-- Add request size limits and stricter JSON validation
 - Add link expiration and usage statistics
 
 ## License

@@ -64,6 +64,9 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Check dependency vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
       - name: Test migrations and API
         shell: bash
         run: |
