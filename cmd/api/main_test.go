@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +15,7 @@ func TestHealthz(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
-	newRouter(NewLinkStore()).ServeHTTP(rec, req)
+	newRouter(NewLinkStore(), newTestLogger()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
@@ -37,7 +39,7 @@ func TestHealthzMethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
-	newRouter(NewLinkStore()).ServeHTTP(rec, req)
+	newRouter(NewLinkStore(), newTestLogger()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405, got %d", rec.Code)
@@ -48,7 +50,7 @@ func TestUnknownRoute(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	rec := httptest.NewRecorder()
 
-	newRouter(NewLinkStore()).ServeHTTP(rec, req)
+	newRouter(NewLinkStore(), newTestLogger()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", rec.Code)
@@ -57,7 +59,7 @@ func TestUnknownRoute(t *testing.T) {
 
 func TestCreateLink(t *testing.T) {
 	store := NewLinkStore()
-	handler := newRouter(store)
+	handler := newRouter(store, newTestLogger())
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -105,7 +107,7 @@ func TestCreateLink(t *testing.T) {
 }
 
 func TestCreateLinkRejectsEmptyURL(t *testing.T) {
-	handler := newRouter(NewLinkStore())
+	handler := newRouter(NewLinkStore(), newTestLogger())
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -132,7 +134,7 @@ func TestRedirectToOriginalURL(t *testing.T) {
 		t.Fatalf("failed to save test link: %v", err)
 	}
 
-	handler := newRouter(store)
+	handler := newRouter(store, newTestLogger())
 
 	req := httptest.NewRequest(http.MethodGet, "/abc12345", nil)
 	rec := httptest.NewRecorder()
@@ -148,7 +150,7 @@ func TestRedirectToOriginalURL(t *testing.T) {
 }
 
 func TestRedirectUnknownCode(t *testing.T) {
-	handler := newRouter(NewLinkStore())
+	handler := newRouter(NewLinkStore(), newTestLogger())
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown1", nil)
 	rec := httptest.NewRecorder()
@@ -210,7 +212,7 @@ func TestValidateURL(t *testing.T) {
 
 func TestCreateLinkRejectsInvalidURL(t *testing.T) {
 	store := NewLinkStore()
-	handler := newRouter(store)
+	handler := newRouter(store, newTestLogger())
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -255,7 +257,7 @@ func (s *conflictLinkRepository) Get(
 
 func TestCreateLinkReturnsErrorAfterMaxConflicts(t *testing.T) {
 	store := &conflictLinkRepository{}
-	handler := newRouter(store)
+	handler := newRouter(store, newTestLogger())
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -277,4 +279,8 @@ func TestCreateLinkReturnsErrorAfterMaxConflicts(t *testing.T) {
 	if store.saveCalls != 5 {
 		t.Errorf("expected 5 save attempts, got %d", store.saveCalls)
 	}
+}
+
+func newTestLogger() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(io.Discard, nil))
 }

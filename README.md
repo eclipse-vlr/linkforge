@@ -15,6 +15,7 @@ The project is built to practice backend development with Go, REST API design, d
 - Use a repository interface to separate HTTP handlers from storage
 - Apply request-scoped timeouts to database operations
 - Provide a health check endpoint
+- Write structured JSON logs to stdout using `log/slog`
 - Test HTTP handlers and error scenarios
 
 ## Tech stack
@@ -171,8 +172,8 @@ The application applies pending database migrations before starting the HTTP ser
 Expected startup output:
 
 ```text
-Database migrations applied successfully
-LinkForge started on :8080
+{"time":"2026-10-13T12:00:00+03:00","level":"INFO","msg":"database migrations applied successfully"}
+{"time":"2026-10-13T12:00:00+03:00","level":"INFO","msg":"starting HTTP server","addr":":8080"}
 ```
 
 Run the application from the repository root because migration files are currently loaded using a relative path.
@@ -266,7 +267,7 @@ linkforge/
 
 - Add database migrations
 - Add configurable base URL for generated short links
-- Add structured logging
+- Add HTTP request logging middleware
 - Add graceful HTTP server shutdown
 - Add integration tests using PostgreSQL
 - Add GitHub Actions for automated testing

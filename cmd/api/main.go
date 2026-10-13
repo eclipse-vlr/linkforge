@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -70,7 +70,7 @@ func validateURL(raw string) error {
 	return nil
 }
 
-func newRouter(store LinkRepository) http.Handler {
+func newRouter(store LinkRepository, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func newRouter(store LinkRepository) http.Handler {
 		for attempt := 0; attempt < maxAttempts; attempt++ {
 			generatedCode, err := generateCode()
 			if err != nil {
-				log.Printf("failed to generate code: %v", err)
+				logger.ErrorContext(r.Context(), "failed to generate code", "error", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
@@ -136,12 +136,13 @@ func newRouter(store LinkRepository) http.Handler {
 				continue
 			}
 
-			log.Printf("failed to save link: %v", err)
+			logger.ErrorContext(r.Context(), "failed to save link", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
 		if !saved {
+			logger.ErrorContext(r.Context(), "failed to generate unique code", "attempts", maxAttempts)
 			http.Error(w, "failed to generate unique code", http.StatusInternalServerError)
 			return
 		}
@@ -165,7 +166,7 @@ func newRouter(store LinkRepository) http.Handler {
 		w.WriteHeader(http.StatusCreated)
 
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("failed to write response: %v", err)
+			logger.ErrorContext(r.Context(), "failed to write response", "error", err)
 		}
 	})
 
@@ -192,7 +193,7 @@ func newRouter(store LinkRepository) http.Handler {
 				return
 			}
 
-			log.Printf("failed to get link: %v", err)
+			logger.ErrorContext(r.Context(), "failed to get link", "error", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
@@ -204,27 +205,32 @@ func newRouter(store LinkRepository) http.Handler {
 }
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
 	connString := os.Getenv("DATABASE_URL")
 	if connString == "" {
 		connString = "postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable"
 	}
 
 	if err := runMigrations(connString); err != nil {
-		log.Fatalf("failed to run migrations: %v", err)
+		logger.Error("failed to run migrations", "error", err)
+		os.Exit(1)
 	}
-	log.Println("Database migrations applied successfully")
+	logger.Info("database migrations applied successfully")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	store, err := NewPostgresStore(ctx, connString)
 	if err != nil {
-		log.Fatalf("failed to connect to PostgreSQL: %v", err)
+		logger.Error("failed to connect to PostgreSQL", "error", err)
+		os.Exit(1)
 	}
 	defer store.Close()
 
-	log.Println("LinkForge started on :8080")
-	if err := http.ListenAndServe(":8080", newRouter(store)); err != nil {
-		log.Fatal(err)
+	logger.Info("starting HTTP server", "addr", ":8080")
+	if err := http.ListenAndServe(":8080", newRouter(store, logger)); err != nil {
+		logger.Error("HTTP server failed", "error", err)
+		os.Exit(1)
 	}
 }
