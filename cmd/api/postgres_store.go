@@ -95,3 +95,29 @@ func (s *PostgresStore) Get(
 
 	return originalURL, nil
 }
+
+func (s *PostgresStore) IncrementClicks(ctx context.Context, code string) error {
+	result, err := s.pool.Exec(ctx,
+		`UPDATE links SET click_count = click_count + 1 WHERE code = $1`, code)
+	if err != nil {
+		return fmt.Errorf("increment link clicks: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrLinkNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) GetStats(ctx context.Context, code string) (LinkStats, error) {
+	var stats LinkStats
+	err := s.pool.QueryRow(ctx,
+		`SELECT code, click_count FROM links WHERE code = $1`, code,
+	).Scan(&stats.Code, &stats.ClickCount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return LinkStats{}, ErrLinkNotFound
+	}
+	if err != nil {
+		return LinkStats{}, fmt.Errorf("select link stats: %w", err)
+	}
+	return stats, nil
+}
