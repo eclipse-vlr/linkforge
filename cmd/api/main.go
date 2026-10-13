@@ -270,6 +270,22 @@ func run(logger *slog.Logger) error {
 	}
 	defer store.Close()
 
+	if cfg.RedisURL != "" {
+		redisClient, err := newRedisClient(cfg.RedisURL, cfg.RedisTimeout)
+		if err != nil {
+			return err
+		}
+		defer redisClient.Close()
+		redisCtx, cancelRedis := context.WithTimeout(ctx, cfg.RedisTimeout)
+		err = redisClient.Ping(redisCtx).Err()
+		cancelRedis()
+		if err != nil {
+			logger.Warn("Redis unavailable; continuing with PostgreSQL", "error", err)
+		} else {
+			logger.Info("Redis connection ready")
+		}
+	}
+
 	handler := loggingMiddleware(logger, newRouter(store, logger, cfg.BaseURL))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler}
 	listener, err := net.Listen("tcp", server.Addr)

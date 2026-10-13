@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type Config struct {
@@ -15,6 +17,8 @@ type Config struct {
 	BaseURL         string
 	DatabaseURL     string
 	ShutdownTimeout time.Duration
+	RedisURL        string
+	RedisTimeout    time.Duration
 }
 
 func loadConfig() (Config, error) {
@@ -22,6 +26,7 @@ func loadConfig() (Config, error) {
 		HTTPAddr:    envOrDefault("HTTP_ADDR", ":8080"),
 		BaseURL:     envOrDefault("BASE_URL", "http://localhost:8080"),
 		DatabaseURL: envOrDefault("DATABASE_URL", "postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable"),
+		RedisURL:    os.Getenv("REDIS_URL"),
 	}
 	_, port, err := net.SplitHostPort(cfg.HTTPAddr)
 	if err != nil || !validPort(port) {
@@ -53,6 +58,19 @@ func loadConfig() (Config, error) {
 	cfg.ShutdownTimeout, err = time.ParseDuration(envOrDefault("SHUTDOWN_TIMEOUT", "10s"))
 	if err != nil || cfg.ShutdownTimeout <= 0 {
 		return Config{}, fmt.Errorf("SHUTDOWN_TIMEOUT must be a positive duration, for example 10s")
+	}
+	if cfg.RedisURL != "" {
+		parsedRedis, parseErr := url.Parse(cfg.RedisURL)
+		if parseErr != nil || (parsedRedis.Scheme != "redis" && parsedRedis.Scheme != "rediss") {
+			return Config{}, fmt.Errorf("REDIS_URL must use the redis or rediss scheme")
+		}
+		if _, err := redis.ParseURL(cfg.RedisURL); err != nil {
+			return Config{}, fmt.Errorf("REDIS_URL must be a valid redis or rediss connection URL")
+		}
+	}
+	cfg.RedisTimeout, err = time.ParseDuration(envOrDefault("REDIS_TIMEOUT", "100ms"))
+	if err != nil || cfg.RedisTimeout <= 0 {
+		return Config{}, fmt.Errorf("REDIS_TIMEOUT must be a positive duration, for example 100ms")
 	}
 	return cfg, nil
 }
