@@ -19,6 +19,7 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	RedisURL        string
 	RedisTimeout    time.Duration
+	RedisCacheTTL   time.Duration
 }
 
 func loadConfig() (Config, error) {
@@ -71,6 +72,10 @@ func loadConfig() (Config, error) {
 	cfg.RedisTimeout, err = time.ParseDuration(envOrDefault("REDIS_TIMEOUT", "100ms"))
 	if err != nil || cfg.RedisTimeout <= 0 {
 		return Config{}, fmt.Errorf("REDIS_TIMEOUT must be a positive duration, for example 100ms")
+	}
+	cfg.RedisCacheTTL, err = time.ParseDuration(envOrDefault("REDIS_CACHE_TTL", "10m"))
+	if err != nil || cfg.RedisCacheTTL < time.Millisecond {
+		return Config{}, fmt.Errorf("REDIS_CACHE_TTL must be at least 1ms, for example 10m")
 	}
 	return cfg, nil
 }

@@ -290,6 +290,7 @@ Unset or empty variables use the defaults below. No `.env` file is loaded automa
 | `SHUTDOWN_TIMEOUT` | `10s` | Positive Go duration for HTTP shutdown, e.g. `500ms` or `15s` |
 | `REDIS_URL` | empty (disabled) | Optional Redis URL, e.g. `redis://localhost:6379/0` or `rediss://host:6379/0` for TLS |
 | `REDIS_TIMEOUT` | `100ms` | Positive duration limiting Redis operations |
+| `REDIS_CACHE_TTL` | `10m` | Cache lifetime, at least `1ms` |
 
 Configuration is checked before migrations and database connections. `BASE_URL`
 must have no credentials, path prefix, query, or fragment; a trailing `/` is
@@ -318,20 +319,24 @@ $env:REDIS_URL = "redis://localhost:6379/0"
 go run ./cmd/api
 ```
 
-Redis is currently connected and checked with `PING` at startup; URL caching is
-not connected yet. If Redis is unavailable, the application logs a warning and
-continues using PostgreSQL. A malformed Redis configuration prevents startup.
+Redis is checked with `PING` at startup. Redirects first look up
+`linkforge:link:{code}` in Redis. On a miss or cache error, the URL is read from
+PostgreSQL and cached for `REDIS_CACHE_TTL`. Unknown codes are not cached.
+Cache failures are logged without preventing redirects. The client stays enabled
+after a failed startup check so later requests can use Redis when it recovers.
+A malformed Redis configuration prevents startup.
 The client is closed after HTTP shutdown. Its operations respect context deadlines,
 and automatic command retries are disabled to keep fallback delays bounded.
 
 The local Redis service exposes port 6379 on loopback only and does not persist
-data: it will hold disposable cache entries. TTL will be added with cache behavior.
+data: it holds disposable cache entries. Cache hits still update click statistics
+in PostgreSQL. Creation and statistics reads also always use PostgreSQL.
 
 To verify the real connection and client cleanup:
 
 ```powershell
 $env:TEST_REDIS_URL = "redis://localhost:6379/0"
-go test -count=1 -run TestRedisConnection ./cmd/api
+go test -count=1 -run TestRedis ./cmd/api
 ```
 
 ## Project structure
