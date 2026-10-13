@@ -181,7 +181,7 @@ Expected startup output:
 Run the application from the repository root because migration files are currently loaded using a relative path.
 
 To stop the application, press Ctrl+C (or send SIGTERM on Linux). The server
-stops accepting connections and waits up to 10 seconds for active requests.
+stops accepting connections and waits up to `SHUTDOWN_TIMEOUT` (10 seconds by default) for active requests.
 If the deadline expires, it closes the remaining connections and reports an
 error. The PostgreSQL pool is closed after HTTP shutdown. For deployment, run
 the compiled binary directly so it receives process signals.
@@ -245,12 +245,30 @@ The migration system ensures that already applied migrations are not executed ag
 
 ## Configuration
 
-The application reads the database connection string from the `DATABASE_URL` environment variable.
+The application reads configuration from environment variables at startup.
+Unset or empty variables use the defaults below. No `.env` file is loaded automatically.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `HTTP_ADDR` | `:8080` | Listening address in `host:port` format; port 1–65535 |
+| `BASE_URL` | `http://localhost:8080` | Public HTTP/HTTPS origin used to generate short links |
+| `DATABASE_URL` | `postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable` | PostgreSQL connection URL |
+| `SHUTDOWN_TIMEOUT` | `10s` | Positive Go duration for HTTP shutdown, e.g. `500ms` or `15s` |
+
+Configuration is checked before migrations and database connections. `BASE_URL`
+must have no credentials, path prefix, query, or fragment; a trailing `/` is
+removed. `HTTP_ADDR` and `BASE_URL` are independent: behind a reverse proxy, the
+listening address may be internal while short links use a public HTTPS domain.
+`DATABASE_URL` must use the `postgres` or `postgresql` scheme and include a hostname;
+database availability and authentication are checked during startup.
 
 Example for local development:
 
 ```powershell
 $env:DATABASE_URL = "postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable"
+$env:HTTP_ADDR = ":9090"
+$env:BASE_URL = "http://localhost:9090"
+$env:SHUTDOWN_TIMEOUT = "15s"
 go run ./cmd/api
 ```
 
@@ -274,7 +292,6 @@ linkforge/
 ## Future improvements
 
 - Add database migrations
-- Add configurable base URL for generated short links
 - Add request IDs to correlate HTTP request logs and errors
 - Add integration tests using PostgreSQL
 - Add GitHub Actions for automated testing
