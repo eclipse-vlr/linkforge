@@ -16,6 +16,7 @@ The project is built to practice backend development with Go, REST API design, d
 - Apply request-scoped timeouts to database operations
 - Provide a health check endpoint
 - Write structured JSON logs to stdout using `log/slog`
+- Log HTTP request method, path, status, and duration through middleware
 - Test HTTP handlers and error scenarios
 
 ## Tech stack
@@ -267,7 +268,7 @@ linkforge/
 
 - Add database migrations
 - Add configurable base URL for generated short links
-- Add HTTP request logging middleware
+- Add request IDs to correlate HTTP request logs and errors
 - Add graceful HTTP server shutdown
 - Add integration tests using PostgreSQL
 - Add GitHub Actions for automated testing
