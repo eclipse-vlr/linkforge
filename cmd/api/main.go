@@ -229,7 +229,8 @@ func main() {
 	defer store.Close()
 
 	logger.Info("starting HTTP server", "addr", ":8080")
-	if err := http.ListenAndServe(":8080", newRouter(store, logger)); err != nil {
+	handler := loggingMiddleware(logger, newRouter(store, logger))
+	if err := http.ListenAndServe(":8080", handler); err != nil {
 		logger.Error("HTTP server failed", "error", err)
 		os.Exit(1)
 	}
