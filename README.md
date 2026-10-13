@@ -17,6 +17,7 @@ The project is built to practice backend development with Go, REST API design, d
 - Provide a health check endpoint
 - Write structured JSON logs to stdout using `log/slog`
 - Log HTTP request method, path, status, and duration through middleware
+- Gracefully stop HTTP requests before closing the PostgreSQL pool
 - Test HTTP handlers and error scenarios
 
 ## Tech stack
@@ -174,10 +175,16 @@ Expected startup output:
 
 ```text
 {"time":"2026-10-13T12:00:00+03:00","level":"INFO","msg":"database migrations applied successfully"}
-{"time":"2026-10-13T12:00:00+03:00","level":"INFO","msg":"starting HTTP server","addr":":8080"}
+{"time":"2026-10-13T12:00:00+03:00","level":"INFO","msg":"HTTP server started","addr":"[::]:8080"}
 ```
 
 Run the application from the repository root because migration files are currently loaded using a relative path.
+
+To stop the application, press Ctrl+C (or send SIGTERM on Linux). The server
+stops accepting connections and waits up to 10 seconds for active requests.
+If the deadline expires, it closes the remaining connections and reports an
+error. The PostgreSQL pool is closed after HTTP shutdown. For deployment, run
+the compiled binary directly so it receives process signals.
 
 ### 5. Test the API
 
@@ -269,7 +276,6 @@ linkforge/
 - Add database migrations
 - Add configurable base URL for generated short links
 - Add request IDs to correlate HTTP request logs and errors
-- Add graceful HTTP server shutdown
 - Add integration tests using PostgreSQL
 - Add GitHub Actions for automated testing
 - Add request size limits and stricter JSON validation

@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -206,6 +209,15 @@ func newRouter(store LinkRepository, logger *slog.Logger) http.Handler {
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := run(logger); err != nil {
+		logger.Error("application failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run(logger *slog.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	connString := os.Getenv("DATABASE_URL")
 	if connString == "" {
@@ -213,25 +225,25 @@ func main() {
 	}
 
 	if err := runMigrations(connString); err != nil {
-		logger.Error("failed to run migrations", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("run migrations: %w", err)
 	}
 	logger.Info("database migrations applied successfully")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	dbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 
-	store, err := NewPostgresStore(ctx, connString)
+	store, err := NewPostgresStore(dbCtx, connString)
+	cancel()
 	if err != nil {
-		logger.Error("failed to connect to PostgreSQL", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 	defer store.Close()
 
-	logger.Info("starting HTTP server", "addr", ":8080")
 	handler := loggingMiddleware(logger, newRouter(store, logger))
-	if err := http.ListenAndServe(":8080", handler); err != nil {
-		logger.Error("HTTP server failed", "error", err)
-		os.Exit(1)
+	server := &http.Server{Addr: ":8080", Handler: handler}
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen HTTP: %w", err)
 	}
+	const shutdownTimeout = 10 * time.Second
+	return serveHTTP(ctx, server, listener, logger, shutdownTimeout)
 }
