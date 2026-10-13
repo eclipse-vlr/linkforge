@@ -288,6 +288,8 @@ Unset or empty variables use the defaults below. No `.env` file is loaded automa
 | `BASE_URL` | `http://localhost:8080` | Public HTTP/HTTPS origin used to generate short links |
 | `DATABASE_URL` | `postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable` | PostgreSQL connection URL |
 | `SHUTDOWN_TIMEOUT` | `10s` | Positive Go duration for HTTP shutdown, e.g. `500ms` or `15s` |
+| `REDIS_URL` | empty (disabled) | Optional Redis URL, e.g. `redis://localhost:6379/0` or `rediss://host:6379/0` for TLS |
+| `REDIS_TIMEOUT` | `100ms` | Positive duration limiting Redis operations |
 
 Configuration is checked before migrations and database connections. `BASE_URL`
 must have no credentials, path prefix, query, or fragment; a trailing `/` is
@@ -307,6 +309,30 @@ go run ./cmd/api
 ```
 
 The default credentials are intended for local development only. Use appropriate secrets and database security settings in a deployed environment.
+
+### Redis connection setup
+
+```powershell
+docker compose up -d --wait redis
+$env:REDIS_URL = "redis://localhost:6379/0"
+go run ./cmd/api
+```
+
+Redis is currently connected and checked with `PING` at startup; URL caching is
+not connected yet. If Redis is unavailable, the application logs a warning and
+continues using PostgreSQL. A malformed Redis configuration prevents startup.
+The client is closed after HTTP shutdown. Its operations respect context deadlines,
+and automatic command retries are disabled to keep fallback delays bounded.
+
+The local Redis service exposes port 6379 on loopback only and does not persist
+data: it will hold disposable cache entries. TTL will be added with cache behavior.
+
+To verify the real connection and client cleanup:
+
+```powershell
+$env:TEST_REDIS_URL = "redis://localhost:6379/0"
+go test -count=1 -run TestRedisConnection ./cmd/api
+```
 
 ## Project structure
 

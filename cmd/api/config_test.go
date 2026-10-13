@@ -8,7 +8,7 @@ import (
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"HTTP_ADDR", "BASE_URL", "DATABASE_URL", "SHUTDOWN_TIMEOUT"} {
+	for _, key := range []string{"HTTP_ADDR", "BASE_URL", "DATABASE_URL", "SHUTDOWN_TIMEOUT", "REDIS_URL", "REDIS_TIMEOUT"} {
 		t.Setenv(key, "")
 	}
 }
@@ -23,6 +23,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 		HTTPAddr: ":8080", BaseURL: "http://localhost:8080",
 		DatabaseURL:     "postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable",
 		ShutdownTimeout: 10 * time.Second,
+		RedisTimeout:    100 * time.Millisecond,
 	}
 	if cfg != want {
 		t.Fatalf("unexpected default config: %+v", cfg)
@@ -35,12 +36,14 @@ func TestLoadConfigOverrides(t *testing.T) {
 	t.Setenv("BASE_URL", "https://sho.rt/")
 	t.Setenv("DATABASE_URL", "postgresql://user:password@db:5433/links?sslmode=require")
 	t.Setenv("SHUTDOWN_TIMEOUT", "750ms")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/1")
+	t.Setenv("REDIS_TIMEOUT", "250ms")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.HTTPAddr != "[::1]:9090" || cfg.BaseURL != "https://sho.rt" ||
-		cfg.DatabaseURL != "postgresql://user:password@db:5433/links?sslmode=require" || cfg.ShutdownTimeout != 750*time.Millisecond {
+		cfg.DatabaseURL != "postgresql://user:password@db:5433/links?sslmode=require" || cfg.ShutdownTimeout != 750*time.Millisecond || cfg.RedisURL != "redis://localhost:6379/1" || cfg.RedisTimeout != 250*time.Millisecond {
 		t.Fatalf("unexpected overridden config: %+v", cfg)
 	}
 }
@@ -69,6 +72,12 @@ func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 		{"SHUTDOWN_TIMEOUT", "10"},
 		{"SHUTDOWN_TIMEOUT", "0s"},
 		{"SHUTDOWN_TIMEOUT", "-1s"},
+		{"REDIS_URL", "https://user:secret@localhost:6379"},
+		{"REDIS_URL", "redis://user:secret%zz@localhost:6379"},
+		{"REDIS_URL", "redis://localhost:6379/not-a-db"},
+		{"REDIS_TIMEOUT", "0s"},
+		{"REDIS_TIMEOUT", "-1ms"},
+		{"REDIS_TIMEOUT", "100"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key+"/"+tt.value, func(t *testing.T) {
