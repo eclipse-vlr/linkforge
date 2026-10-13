@@ -73,7 +73,7 @@ func validateURL(raw string) error {
 	return nil
 }
 
-func newRouter(store LinkRepository, logger *slog.Logger) http.Handler {
+func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +161,7 @@ func newRouter(store LinkRepository, logger *slog.Logger) http.Handler {
 
 		response := CreateLinkResponse{
 			Code:        code,
-			ShortURL:    "http://localhost:8080/" + code,
+			ShortURL:    baseURL + "/" + code,
 			OriginalURL: req.URL,
 		}
 
@@ -216,34 +216,32 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	connString := os.Getenv("DATABASE_URL")
-	if connString == "" {
-		connString = "postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable"
-	}
-
-	if err := runMigrations(connString); err != nil {
+	if err := runMigrations(cfg.DatabaseURL); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 	logger.Info("database migrations applied successfully")
 
 	dbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 
-	store, err := NewPostgresStore(dbCtx, connString)
+	store, err := NewPostgresStore(dbCtx, cfg.DatabaseURL)
 	cancel()
 	if err != nil {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 	defer store.Close()
 
-	handler := loggingMiddleware(logger, newRouter(store, logger))
-	server := &http.Server{Addr: ":8080", Handler: handler}
+	handler := loggingMiddleware(logger, newRouter(store, logger, cfg.BaseURL))
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler}
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		return fmt.Errorf("listen HTTP: %w", err)
 	}
-	const shutdownTimeout = 10 * time.Second
-	return serveHTTP(ctx, server, listener, logger, shutdownTimeout)
+	return serveHTTP(ctx, server, listener, logger, cfg.ShutdownTimeout)
 }

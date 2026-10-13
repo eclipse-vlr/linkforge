@@ -15,7 +15,7 @@ func TestHealthz(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
-	newRouter(NewLinkStore(), newTestLogger()).ServeHTTP(rec, req)
+	newRouter(NewLinkStore(), newTestLogger(), "https://sho.rt").ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
@@ -39,7 +39,7 @@ func TestHealthzMethodNotAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
-	newRouter(NewLinkStore(), newTestLogger()).ServeHTTP(rec, req)
+	newRouter(NewLinkStore(), newTestLogger(), "https://sho.rt").ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405, got %d", rec.Code)
@@ -50,7 +50,7 @@ func TestUnknownRoute(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	rec := httptest.NewRecorder()
 
-	newRouter(NewLinkStore(), newTestLogger()).ServeHTTP(rec, req)
+	newRouter(NewLinkStore(), newTestLogger(), "https://sho.rt").ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", rec.Code)
@@ -59,7 +59,7 @@ func TestUnknownRoute(t *testing.T) {
 
 func TestCreateLink(t *testing.T) {
 	store := NewLinkStore()
-	handler := newRouter(store, newTestLogger())
+	handler := newRouter(store, newTestLogger(), "https://sho.rt")
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -88,7 +88,7 @@ func TestCreateLink(t *testing.T) {
 		t.Errorf("unexpected original URL: %q", response.OriginalURL)
 	}
 
-	if response.ShortURL != "http://localhost:8080/"+response.Code {
+	if response.ShortURL != "https://sho.rt/"+response.Code {
 		t.Errorf("unexpected short URL: %q", response.ShortURL)
 	}
 
@@ -107,7 +107,7 @@ func TestCreateLink(t *testing.T) {
 }
 
 func TestCreateLinkRejectsEmptyURL(t *testing.T) {
-	handler := newRouter(NewLinkStore(), newTestLogger())
+	handler := newRouter(NewLinkStore(), newTestLogger(), "https://sho.rt")
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -134,7 +134,7 @@ func TestRedirectToOriginalURL(t *testing.T) {
 		t.Fatalf("failed to save test link: %v", err)
 	}
 
-	handler := newRouter(store, newTestLogger())
+	handler := newRouter(store, newTestLogger(), "https://sho.rt")
 
 	req := httptest.NewRequest(http.MethodGet, "/abc12345", nil)
 	rec := httptest.NewRecorder()
@@ -150,7 +150,7 @@ func TestRedirectToOriginalURL(t *testing.T) {
 }
 
 func TestRedirectUnknownCode(t *testing.T) {
-	handler := newRouter(NewLinkStore(), newTestLogger())
+	handler := newRouter(NewLinkStore(), newTestLogger(), "https://sho.rt")
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown1", nil)
 	rec := httptest.NewRecorder()
@@ -212,7 +212,7 @@ func TestValidateURL(t *testing.T) {
 
 func TestCreateLinkRejectsInvalidURL(t *testing.T) {
 	store := NewLinkStore()
-	handler := newRouter(store, newTestLogger())
+	handler := newRouter(store, newTestLogger(), "https://sho.rt")
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -257,7 +257,7 @@ func (s *conflictLinkRepository) Get(
 
 func TestCreateLinkReturnsErrorAfterMaxConflicts(t *testing.T) {
 	store := &conflictLinkRepository{}
-	handler := newRouter(store, newTestLogger())
+	handler := newRouter(store, newTestLogger(), "https://sho.rt")
 
 	req := httptest.NewRequest(
 		http.MethodPost,
