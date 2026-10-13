@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/big"
 	"net"
@@ -16,6 +17,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+)
+
+const (
+	maxCreateLinkBodyBytes = 16 * 1024
+	maxURLBytes            = 4096
 )
 
 type CreateLinkRequest struct {
@@ -55,6 +61,9 @@ func generateCode() (string, error) {
 }
 
 func validateURL(raw string) error {
+	if len(raw) > maxURLBytes {
+		return fmt.Errorf("URL must not exceed %d bytes", maxURLBytes)
+	}
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return err
@@ -96,9 +105,17 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxCreateLinkBodyBytes)
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
 		var req CreateLinkRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid JSON", http.StatusBadRequest)
+		if err := decoder.Decode(&req); err != nil {
+			writeJSONRequestError(w, err)
+			return
+		}
+		// A successful first Decode does not rule out another value or trailing junk.
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			writeJSONRequestError(w, err)
 			return
 		}
 
@@ -240,6 +257,15 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 	return mux
 }
 
+func writeJSONRequestError(w http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, "body must contain exactly one JSON object with a url field", http.StatusBadRequest)
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(logger); err != nil {
@@ -256,7 +282,7 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := runMigrations(cfg.DatabaseURL); err != nil {
+	if err := runMigrations(ctx, cfg.DatabaseURL); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 	logger.Info("database migrations applied successfully")
@@ -292,7 +318,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	handler := loggingMiddleware(logger, newRouter(repository, logger, cfg.BaseURL))
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: handler}
+	server := newHTTPServer(cfg.HTTPAddr, handler)
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		return fmt.Errorf("listen HTTP: %w", err)
