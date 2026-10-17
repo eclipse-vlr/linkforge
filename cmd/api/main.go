@@ -80,6 +80,9 @@ func validateURL(raw string) error {
 	if parsed.Host == "" || parsed.Hostname() == "" {
 		return fmt.Errorf("URL must contain a hostname")
 	}
+	if (parsed.Port() != "" && !validPort(parsed.Port())) || strings.HasSuffix(parsed.Host, ":") {
+		return fmt.Errorf("URL port must be from 1 to 65535")
+	}
 
 	return nil
 }
@@ -90,6 +93,7 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -102,6 +106,7 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 
 	mux.Handle("/api/v1/links", createLimiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -219,6 +224,7 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}

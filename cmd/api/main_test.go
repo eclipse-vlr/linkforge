@@ -192,6 +192,14 @@ func TestValidateURL(t *testing.T) {
 			url:     "https:///article",
 			wantErr: true,
 		},
+		{name: "lowest port", url: "https://example.com:1/article"},
+		{name: "highest port", url: "https://example.com:65535/article"},
+		{name: "IPv6 with port", url: "http://[::1]:8080/article"},
+		{name: "zero port", url: "https://example.com:0/article", wantErr: true},
+		{name: "port above range", url: "https://example.com:65536/article", wantErr: true},
+		{name: "large port", url: "https://example.com:999999/article", wantErr: true},
+		{name: "empty port", url: "https://example.com:/article", wantErr: true},
+		{name: "IPv6 port above range", url: "http://[::1]:65536/article", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -211,27 +219,57 @@ func TestValidateURL(t *testing.T) {
 }
 
 func TestCreateLinkRejectsInvalidURL(t *testing.T) {
-	store := NewLinkStore()
-	handler := newRouter(store, newTestLogger(), "https://sho.rt")
+	for _, rawURL := range []string{"ftp://example.com", "https://example.com:65536/path", "https://example.com:0/path", "https://example.com:/path"} {
+		t.Run(rawURL, func(t *testing.T) {
+			store := NewLinkStore()
+			handler := newRouter(store, newTestLogger(), "https://sho.rt")
 
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/v1/links",
-		strings.NewReader(`{"url":"ftp://example.com"}`),
-	)
+			req := httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/links",
+				strings.NewReader(`{"url":"`+rawURL+`"}`),
+			)
 
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("expected status 400, got %d", rec.Code)
+			}
+
+			store.mu.RLock()
+			defer store.mu.RUnlock()
+
+			if len(store.links) != 0 {
+				t.Errorf("expected no links to be saved, got %d", len(store.links))
+			}
+		})
 	}
+}
 
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
-	if len(store.links) != 0 {
-		t.Errorf("expected no links to be saved, got %d", len(store.links))
+func TestMethodNotAllowedHeaders(t *testing.T) {
+	store := NewLinkStore()
+	if err := store.Save(context.Background(), "abc12345", "https://example.com"); err != nil {
+		t.Fatal(err)
+	}
+	handler := newRouter(store, newTestLogger(), "https://sho.rt")
+	for _, tc := range []struct{ method, path, allow string }{
+		{http.MethodPost, "/healthz", http.MethodGet},
+		{http.MethodGet, "/api/v1/links", http.MethodPost},
+		{http.MethodOptions, "/api/v1/links", http.MethodPost},
+		{http.MethodPost, "/abc12345", http.MethodGet},
+		{http.MethodPost, "/api/v1/links/abc12345/stats", http.MethodGet},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+			if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != tc.allow {
+				t.Fatalf("status=%d, Allow=%q; want 405, %q", rec.Code, rec.Header().Get("Allow"), tc.allow)
+			}
+		})
+	}
+	if len(store.links) != 1 || store.clicks["abc12345"] != 0 {
+		t.Fatal("unsupported methods changed storage")
 	}
 }
 

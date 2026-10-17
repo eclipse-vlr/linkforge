@@ -6,13 +6,22 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4/database"
 	"github.com/jackc/pgx/v5"
 )
 
 func TestMigrationsPostgres(t *testing.T) {
+	for _, mode := range []string{"cancel", "deadline", "advisory_lock"} {
+		t.Run(mode, func(t *testing.T) { testMigrationsPostgresCancellation(t, mode) })
+	}
+}
+
+func testMigrationsPostgresCancellation(t *testing.T, mode string) {
+	t.Helper()
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("set TEST_DATABASE_URL to test migration cancellation against PostgreSQL")
@@ -74,19 +83,37 @@ func TestMigrationsPostgres(t *testing.T) {
 		t.Fatalf("unexpected migration state: %d, %t", version, dirty)
 	}
 
-	// Hold a table lock so that the next migration cannot complete.
+	// Block either SQL execution or the migrator's initial advisory lock.
 	tx, err := admin.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, err := tx.Exec(ctx, "LOCK TABLE "+quotedSchema+".links IN ACCESS EXCLUSIVE MODE"); err != nil {
-		t.Fatal(err)
+	if mode == "advisory_lock" {
+		lockID, err := database.GenerateAdvisoryLockId(admin.Config().Database, schema, "schema_migrations")
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := strconv.ParseInt(lockID, 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", id); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if _, err := tx.Exec(ctx, "LOCK TABLE "+quotedSchema+".links IN ACCESS EXCLUSIVE MODE"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile("000003_blocked.up.sql", []byte("ALTER TABLE links ADD COLUMN test_column text;"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	migrationCtx, stopMigration := context.WithCancel(ctx)
+	if mode == "deadline" {
+		stopMigration()
+		migrationCtx, stopMigration = context.WithTimeout(ctx, 3*time.Second)
+	}
 	defer stopMigration()
 	result := make(chan error, 1)
 	go func() { result <- applyMigrations(migrationCtx, "file://.", parsed.String()) }()
@@ -112,23 +139,60 @@ func TestMigrationsPostgres(t *testing.T) {
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
-	stopMigration()
+	wantErr := context.Canceled
+	if mode != "deadline" {
+		stopMigration()
+	} else {
+		wantErr = context.DeadlineExceeded
+	}
 	select {
 	case err := <-result:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("got %v, want cancellation", err)
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("got %v, want %v", err, wantErr)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(6 * time.Second):
 		t.Fatal("blocked SQL migration did not stop")
+	}
+	// A closed client is not proof of server-side cancellation. Keep the lock
+	// held until PostgreSQL itself confirms that the SQL is no longer active.
+	stoppedCtx, stopWait := context.WithTimeout(ctx, 3*time.Second)
+	defer stopWait()
+	for {
+		if _, err := tx.Exec(stoppedCtx, "SELECT pg_stat_clear_snapshot()"); err != nil {
+			t.Fatal(err)
+		}
+		var active bool
+		if err := tx.QueryRow(stoppedCtx, "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE application_name=$1 AND state='active')", schema).Scan(&active); err != nil {
+			t.Fatal(err)
+		}
+		if !active {
+			break
+		}
+		select {
+		case <-stoppedCtx.Done():
+			t.Fatal("migration returned but PostgreSQL is still executing SQL")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
+	}
+	var altered bool
+	if err := admin.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='links' AND column_name='test_column')", schema).Scan(&altered); err != nil {
+		t.Fatal(err)
+	}
+	if altered {
+		t.Fatal("canceled DDL changed the schema after the lock was released")
 	}
 	// An interrupted migration stays dirty; never silently force its version.
 	if err := admin.QueryRow(ctx, "SELECT version, dirty FROM "+quotedSchema+".schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 || !dirty {
-		t.Fatalf("expected dirty interrupted migration, got %d, %t", version, dirty)
+	wantVersion, wantDirty := 3, true
+	if mode == "advisory_lock" {
+		wantVersion, wantDirty = 2, false
+	}
+	if version != wantVersion || dirty != wantDirty {
+		t.Fatalf("migration state = %d/%t, want %d/%t", version, dirty, wantVersion, wantDirty)
 	}
 }

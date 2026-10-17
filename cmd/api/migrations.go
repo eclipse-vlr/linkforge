@@ -5,16 +5,20 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
+	"strconv"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
-const migrationTimeout = 30 * time.Second
+const (
+	migrationTimeout       = 30 * time.Second
+	migrationCancelTimeout = 2 * time.Second
+)
 
 func runMigrations(ctx context.Context, databaseURL string) error {
 	return applyMigrations(ctx, "file://migrations", databaseURL)
@@ -25,12 +29,19 @@ func applyMigrations(parent context.Context, sourceURL, databaseURL string) (res
 	var db *sql.DB
 	var conn *sql.Conn
 	var m *migrate.Migrate
+	var stopCancellation func() bool
+	var cancellationDone chan struct{}
+	var cancellationErr error
 	defer func() {
 		ctxErr := ctx.Err()
 		// On failure, interrupt outstanding driver operations before cleanup.
 		// On success, let PostgreSQL receive a normal connection termination.
 		if result != nil || ctxErr != nil {
 			cancel()
+		}
+		// Join the callback before closing driver resources or reading its error.
+		if stopCancellation != nil && !stopCancellation() {
+			<-cancellationDone
 		}
 		if m != nil {
 			sourceErr, databaseErr := m.Close()
@@ -42,19 +53,55 @@ func applyMigrations(parent context.Context, sourceURL, databaseURL string) (res
 			result = errors.Join(result, db.Close())
 		}
 		cancel()
-		result = errors.Join(result, ctxErr)
+		result = errors.Join(result, ctxErr, cancellationErr)
 	}()
 
-	connector, err := pq.NewConnector(databaseURL)
+	config, err := pgx.ParseConfig(databaseURL)
 	if err != nil {
-		return fmt.Errorf("configure migration connection: %w", err)
+		return fmt.Errorf("invalid migration database configuration")
 	}
-	connector.Dialer(migrationDialer{ctx: ctx})
-	db = sql.OpenDB(connector)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deadline, _ := ctx.Deadline()
+	// Server-side limits remain effective if cancellation cannot be delivered.
+	remainingMS := max(int64(1), int64((time.Until(deadline)+time.Millisecond-1)/time.Millisecond))
+	config.RuntimeParams["statement_timeout"] = strconv.FormatInt(remainingMS, 10)
+	config.RuntimeParams["lock_timeout"] = strconv.FormatInt(remainingMS, 10)
+	db = stdlib.OpenDB(*config)
+	db.SetMaxOpenConns(1)
 	conn, err = db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("connect for migrations: %w", err)
 	}
+	var native *pgx.Conn
+	if err := conn.Raw(func(driverConn any) error {
+		pgxDriver, ok := driverConn.(*stdlib.Conn)
+		if !ok {
+			return fmt.Errorf("unexpected migration connection type %T", driverConn)
+		}
+		native = pgxDriver.Conn()
+		return nil
+	}); err != nil {
+		return fmt.Errorf("access migration connection: %w", err)
+	}
+	pgConn := native.PgConn()
+	cancellationDone = make(chan struct{})
+	stopCancellation = context.AfterFunc(ctx, func() {
+		defer close(cancellationDone)
+		// A canceled startup context cannot deliver the separate cancel request.
+		cancelCtx, cancelRequest := context.WithTimeout(context.Background(), migrationCancelTimeout)
+		defer cancelRequest()
+		cancellationErr = pgConn.CancelRequest(cancelCtx)
+		if cancellationErr == nil {
+			cancellationErr = cancelCtx.Err()
+		}
+		if cancellationErr != nil {
+			cancellationErr = fmt.Errorf("cancel migration query: %w", cancellationErr)
+		}
+		// Only after sending CancelRequest, unblock I/O and forbid further SQL.
+		_ = pgConn.Conn().Close()
+	})
 	driver, err := postgres.WithConnection(ctx, conn, &postgres.Config{})
 	if err != nil {
 		return fmt.Errorf("initialize migration driver: %w", err)
@@ -67,35 +114,4 @@ func applyMigrations(parent context.Context, sourceURL, databaseURL string) (res
 		return fmt.Errorf("apply migrations: %w", err)
 	}
 	return nil
-}
-
-// The migration driver uses context.Background for locks and some queries.
-// Binding its sockets to the startup context also bounds authentication, locks,
-// and SQL execution, without leaving a blocked migration goroutine behind.
-type migrationDialer struct {
-	ctx context.Context
-}
-
-func (d migrationDialer) Dial(network, address string) (net.Conn, error) {
-	return d.DialTimeout(network, address, 0)
-}
-
-func (d migrationDialer) DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
-	dialer := net.Dialer{Timeout: timeout}
-	conn, err := dialer.DialContext(d.ctx, network, address)
-	if err != nil {
-		return nil, err
-	}
-	stop := context.AfterFunc(d.ctx, func() { _ = conn.Close() })
-	return &migrationConn{Conn: conn, stop: stop}, nil
-}
-
-type migrationConn struct {
-	net.Conn
-	stop func() bool
-}
-
-func (c *migrationConn) Close() error {
-	c.stop()
-	return c.Conn.Close()
 }
