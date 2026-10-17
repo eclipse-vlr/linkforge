@@ -86,6 +86,7 @@ func validateURL(raw string) error {
 
 func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.Handler {
 	mux := http.NewServeMux()
+	createLimiter := newCreateLinkLimiter()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -99,7 +100,7 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 		})
 	})
 
-	mux.HandleFunc("/api/v1/links", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/v1/links", createLimiter.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -190,7 +191,7 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			logger.ErrorContext(r.Context(), "failed to write response", "error", err)
 		}
-	})
+	})))
 
 	mux.HandleFunc("/api/v1/links/{code}/stats", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

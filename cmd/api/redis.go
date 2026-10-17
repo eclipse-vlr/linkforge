@@ -10,11 +10,19 @@ import (
 )
 
 type RedisLinkCache struct {
-	client *redis.Client
+	client    *redis.Client
+	keyPrefix string
+}
+
+func (c *RedisLinkCache) key(code string) string {
+	if c.keyPrefix != "" {
+		return c.keyPrefix + code
+	}
+	return "linkforge:link:" + code
 }
 
 func (c *RedisLinkCache) Get(ctx context.Context, code string) (string, bool, error) {
-	value, err := c.client.Get(ctx, "linkforge:link:"+code).Result()
+	value, err := c.client.Get(ctx, c.key(code)).Result()
 	if errors.Is(err, redis.Nil) {
 		return "", false, nil
 	}
@@ -25,7 +33,7 @@ func (c *RedisLinkCache) Get(ctx context.Context, code string) (string, bool, er
 }
 
 func (c *RedisLinkCache) Set(ctx context.Context, code, originalURL string, ttl time.Duration) error {
-	return c.client.Set(ctx, "linkforge:link:"+code, originalURL, ttl).Err()
+	return c.client.Set(ctx, c.key(code), originalURL, ttl).Err()
 }
 
 func newRedisClient(connectionURL string, timeout time.Duration) (*redis.Client, error) {
