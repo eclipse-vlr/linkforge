@@ -358,4 +358,3 @@ func TestCreateLinkOptionalAPIKey(t *testing.T) {
 		t.Fatalf("expected only authorized request to create link, got %d links", len(store.links))
 	}
 }
-

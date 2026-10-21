@@ -4,7 +4,18 @@ on:
   push:
     branches: [master]
     paths:
-      - "cmd/loadtest/**"
+      - "cmd/**"
+      - "migrations/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/benchmark.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "cmd/**"
+      - "migrations/**"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/benchmark.yml"
   workflow_dispatch:
 

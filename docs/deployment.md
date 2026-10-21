@@ -1,6 +1,6 @@
-# Развёртывание LinkForge (подготовка, не публичный стенд)
+# Развёртывание LinkForge
 
-> Пока здесь **нет рабочего публичного URL**. Dockerfile подготовлен, но образ ещё не был собран и проверен на хостинге. Эти шаги не означают, что приложение уже опубликовано.
+> Публичный стенд пока не развёрнут. Docker-образ собран и проверен локально: PostgreSQL, работа с Redis и без него, отказ Redis, авторизация, редиректы, статистика и корректная остановка. Сборка и проверка контейнера также включены в CI.
 
 ## Требования
 
@@ -49,4 +49,12 @@ docker run --rm -p 127.0.0.1:8080:8080 `
   -e BASE_URL='http://localhost:8080' linkforge:local
 ```
 
-Эта команда рассчитана на Docker Desktop под Windows; `host.docker.internal` на других системах может требовать отдельной настройки. Команды не проверены в данном окружении.
+Этот пример рассчитан на Docker Desktop под Windows. Для Docker Engine под Linux используй общую сеть Compose, чтобы API подключался к PostgreSQL по имени `db`:
+
+```bash
+docker build -t linkforge:local .
+docker compose -p linkforge up -d --wait db
+docker run --rm --network linkforge_default -p 127.0.0.1:8080:8080 \
+  -e DATABASE_URL='postgres://linkforge:devpassword@db:5432/linkforge?sslmode=disable' \
+  -e BASE_URL='http://localhost:8080' linkforge:local
+```
