@@ -4,7 +4,7 @@
 
 Сервис сокращения ссылок на Go. Создаёт короткие ссылки, перенаправляет на исходные URL и считает переходы. Pet-проект для портфолио Go Backend Developer.
 
-**Стек:** Go 1.27.2, `net/http`, PostgreSQL 17, `pgxpool`, Redis 7, `golang-migrate`, `log/slog`, Docker Compose, GitHub Actions.
+**Стек:** Go 1.27.3, `net/http`, PostgreSQL 17, `pgxpool`, Redis 7, `golang-migrate`, `log/slog`, Docker Compose, GitHub Actions.
 
 ## Возможности
 
