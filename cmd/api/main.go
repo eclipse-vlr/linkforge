@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,6 +110,16 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 			w.Header().Set("Allow", http.MethodPost)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
+		}
+
+		// Optional authentication for public deployments. Local development
+		// remains unchanged when CREATE_LINK_API_KEY is not set.
+		if expectedKey := os.Getenv("CREATE_LINK_API_KEY"); expectedKey != "" {
+			providedKey := r.Header.Get("X-API-Key")
+			if subtle.ConstantTimeCompare([]byte(providedKey), []byte(expectedKey)) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxCreateLinkBodyBytes)
