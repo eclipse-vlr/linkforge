@@ -42,6 +42,11 @@ paths:
         Не более 4096 байт в URL и 16384 байт во всём теле запроса.
         На создание действует лимит 10 запросов за 60 секунд с IP.
         Ошибочные запросы также учитываются лимитером.
+        Если задана переменная CREATE_LINK_API_KEY, требуется заголовок X-API-Key.
+        Если переменная не задана, этот маршрут не требует ключа.
+      security:
+        - {}
+        - CreateLinkApiKey: []
       requestBody:
         required: true
         content:
@@ -65,6 +70,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
+        '401':
+          description: Отсутствует или неверен X-API-Key, если включена опциональная авторизация
+          content:
+            text/plain:
+              schema:
+                type: string
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '429':
@@ -143,6 +154,12 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 components:
+  securitySchemes:
+    CreateLinkApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Требуется только при установленной CREATE_LINK_API_KEY.
   parameters:
     Code:
       name: code
