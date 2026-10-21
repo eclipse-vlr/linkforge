@@ -1,0 +1,232 @@
+openapi: 3.0.3
+info:
+  title: LinkForge API
+  version: 0.1.0
+  description: |
+    Документация текущего HTTP API LinkForge, сверенная с обработчиками в cmd/api/main.go.
+    Версия здесь относится к спецификации, а не к опубликованному GitHub Release.
+    Ошибки стандартного net/http возвращаются текстом, а не JSON.
+servers:
+  - url: http://localhost:8080
+    description: Локальный запуск (BASE_URL и HTTP_ADDR могут быть изменены)
+tags:
+  - name: Сервис
+  - name: Ссылки
+paths:
+  /healthz:
+    get:
+      tags: [Сервис]
+      summary: Проверить работу HTTP-процесса
+      description: Не проверяет доступность PostgreSQL или Redis.
+      operationId: healthz
+      responses:
+        '200':
+          description: HTTP-процесс отвечает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+  /api/v1/links:
+    post:
+      tags: [Ссылки]
+      summary: Создать короткую ссылку
+      operationId: createLink
+      description: |
+        Запрос принимает ровно один JSON-объект с полем url.
+        Неизвестные поля и данные после JSON отклоняются.
+        URL обрезается по краям от пробелов; допускается абсолютный HTTP/HTTPS URL.
+        Не более 4096 байт в URL и 16384 байт во всём теле запроса.
+        На создание действует лимит 10 запросов за 60 секунд с IP.
+        Ошибочные запросы также учитываются лимитером.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLinkRequest'
+            example:
+              url: https://example.com/article
+      responses:
+        '201':
+          description: Ссылка создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateLinkResponse'
+              example:
+                code: aB23cdEf
+                short_url: http://localhost:8080/aB23cdEf
+                original_url: https://example.com/article
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '429':
+          description: Превышен лимит создания ссылок с IP
+          headers:
+            Retry-After:
+              description: Рекомендуемая задержка до следующей попытки (в секундах)
+              schema:
+                type: string
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: Лимитер не может принять новый IP (в том числе при переполнении таблицы адресов)
+          headers:
+            Retry-After:
+              description: Задержка до повтора
+              schema:
+                type: string
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/v1/links/{code}/stats:
+    get:
+      tags: [Ссылки]
+      summary: Статистика переходов
+      operationId: getLinkStats
+      description: Статистика публичная и включает повторные обращения и ботов.
+      parameters:
+        - $ref: '#/components/parameters/Code'
+      responses:
+        '200':
+          description: Статистика найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkStats'
+              example:
+                code: aB23cdEf
+                click_count: 3
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /{code}:
+    get:
+      tags: [Ссылки]
+      summary: Перенаправить по короткому коду
+      operationId: redirectLink
+      description: |
+        Возвращает 302 с Location исходной ссылки.
+        Ошибка сохранения счётчика не блокирует редирект.
+        Следование редиректу зависит от HTTP-клиента.
+      parameters:
+        - $ref: '#/components/parameters/Code'
+      responses:
+        '302':
+          description: Перенаправление
+          headers:
+            Location:
+              description: Исходный URL
+              required: true
+              schema:
+                type: string
+                format: uri
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  parameters:
+    Code:
+      name: code
+      in: path
+      description: Код короткой ссылки
+      required: true
+      schema:
+        type: string
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    CreateLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: Абсолютный HTTP/HTTPS URL; ограничение 4096 байт проверяется сервером
+          example: https://example.com/article
+    CreateLinkResponse:
+      type: object
+      required: [code, short_url, original_url]
+      properties:
+        code:
+          type: string
+          description: Случайный код длиной 8 символов
+          minLength: 8
+          maxLength: 8
+          pattern: '^[a-zA-Z0-9]{8}$'
+        short_url:
+          type: string
+          format: uri
+        original_url:
+          type: string
+          format: uri
+    LinkStats:
+      type: object
+      required: [code, click_count]
+      properties:
+        code:
+          type: string
+        click_count:
+          type: integer
+          format: int64
+          minimum: 0
+  responses:
+    BadRequest:
+      description: Ошибка в JSON или некорректный URL
+      content:
+        text/plain:
+          schema:
+            type: string
+    RequestTooLarge:
+      description: Тело запроса превышает 16 КиБ
+      content:
+        text/plain:
+          schema:
+            type: string
+    NotFound:
+      description: Код не найден
+      content:
+        text/plain:
+          schema:
+            type: string
+    MethodNotAllowed:
+      description: Метод не поддерживается
+      headers:
+        Allow:
+          description: Разрешённый HTTP-метод
+          schema:
+            type: string
+      content:
+        text/plain:
+          schema:
+            type: string
+    InternalError:
+      description: Внутренняя ошибка
+      content:
+        text/plain:
+          schema:
+            type: string
