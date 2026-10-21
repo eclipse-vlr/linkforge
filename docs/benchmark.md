@@ -34,7 +34,7 @@ go run ./cmd/loadtest -base http://127.0.0.1:8080 -requests 500 -workers 10 -out
 
 ## Замеры в GitHub Actions
 
-Добавлен отдельный workflow [HTTP benchmark](../.github/workflows/benchmark.yml), который при первом добавлении запускается на `master` и может запускаться вручную через **Actions → HTTP benchmark → Run workflow**. Он поднимает PostgreSQL и Redis, запускает локальный API, выполняет 500 запросов в 10 потоков и сохраняет `benchmark-report.json` в артефакт `linkforge-benchmark`.
+Отдельный workflow [HTTP benchmark](../.github/workflows/benchmark.yml) запускается для pull request и коммитов в `master`, затрагивающих API, нагрузочную утилиту, миграции или зависимости. Его также можно запустить вручную через **Actions → HTTP benchmark → Run workflow**. Он поднимает PostgreSQL и Redis, запускает локальный API, выполняет 500 запросов в 10 потоков и сохраняет `benchmark-report.json` в артефакт `linkforge-benchmark`.
 
 Пока здесь не опубликованы числа из подтверждённого запуска. Результаты CI зависят от общей виртуальной машины GitHub и не равны показателям выделенного сервера.
 
@@ -51,7 +51,7 @@ go run ./cmd/loadtest -base http://127.0.0.1:8080 -requests 500 -workers 10 -out
 | Ошибки | Количество не-302 и сетевых ошибок |
 | Результаты | RPS, p50, p95 и p99 из реального вывода |
 
-**Фактические цифры пока не опубликованы:** у автора изменений не было доступного запущенного экземпляра LinkForge и среды Docker с PostgreSQL. Не используем вымышленные измерения. Когда замеры будут выполнены, результат можно добавить в `docs/benchmarks/` с указанием среды.
+Актуальные JSON-отчёты хранятся в артефактах workflow **HTTP benchmark**. Для сравнения скачивай отчёт нужного запуска и сохраняй его вместе с условиями замера из таблицы выше.
 
 ## На что обратить внимание
 

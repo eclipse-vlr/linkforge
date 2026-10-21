@@ -65,8 +65,12 @@ func loadConfig() (Config, error) {
 		if parseErr != nil || (parsedRedis.Scheme != "redis" && parsedRedis.Scheme != "rediss") {
 			return Config{}, fmt.Errorf("REDIS_URL must use the redis or rediss scheme")
 		}
-		if _, err := redis.ParseURL(cfg.RedisURL); err != nil {
-			return Config{}, fmt.Errorf("REDIS_URL must be a valid redis or rediss connection URL")
+		if (parsedRedis.Port() != "" && !validPort(parsedRedis.Port())) || strings.HasSuffix(parsedRedis.Host, ":") || strings.Contains(cfg.RedisURL, "#") {
+			return Config{}, fmt.Errorf("REDIS_URL must have a valid port and no fragment")
+		}
+		options, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil || options.DB < 0 {
+			return Config{}, fmt.Errorf("REDIS_URL must be a valid redis or rediss connection URL with a non-negative database number")
 		}
 	}
 	cfg.RedisTimeout, err = time.ParseDuration(envOrDefault("REDIS_TIMEOUT", "100ms"))
