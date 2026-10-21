@@ -1,0 +1,80 @@
+name: HTTP benchmark
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/benchmark.yml'
+      - 'cmd/loadtest/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: linkforge
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: linkforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linkforge -d linkforge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://linkforge:devpassword@localhost:5432/linkforge?sslmode=disable
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Benchmark local redirects
+        shell: bash
+        run: |
+          go run ./cmd/api > server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:8080/healthz; then
+              break
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              cat server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/healthz
+          go run ./cmd/loadtest -base http://127.0.0.1:8080 -requests 500 -workers 10 -out benchmark-report.json
+
+      - name: Save measured results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linkforge-benchmark
+          path: |
+            benchmark-report.json
+            server.log
+          if-no-files-found: warn
+          retention-days: 14
