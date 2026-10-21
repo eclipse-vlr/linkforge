@@ -330,3 +330,31 @@ func TestCreateLinkReturnsErrorAfterMaxConflicts(t *testing.T) {
 func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(io.Discard, nil))
 }
+
+func TestCreateLinkOptionalAPIKey(t *testing.T) {
+	t.Setenv("CREATE_LINK_API_KEY", "test-secret")
+	store := NewLinkStore()
+	handler := newRouter(store, newTestLogger(), "https://sho.rt")
+
+	for _, tc := range []struct {
+		name, key string
+		want      int
+	}{
+		{name: "missing key", key: "", want: http.StatusUnauthorized},
+		{name: "wrong key", key: "wrong", want: http.StatusUnauthorized},
+		{name: "correct key", key: "test-secret", want: http.StatusCreated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/links", strings.NewReader(`{"url":"https://example.com"}`))
+			req.Header.Set("X-API-Key", tc.key)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status=%d, want=%d, body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+	if len(store.links) != 1 {
+		t.Fatalf("expected only authorized request to create link, got %d links", len(store.links))
+	}
+}

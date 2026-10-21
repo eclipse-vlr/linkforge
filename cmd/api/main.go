@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -111,16 +112,19 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, maxCreateLinkBodyBytes)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		var req CreateLinkRequest
-		if err := decoder.Decode(&req); err != nil {
-			writeJSONRequestError(w, err)
-			return
+		// Optional authentication for public deployments. Local development
+		// remains unchanged when CREATE_LINK_API_KEY is not set.
+		if expectedKey := os.Getenv("CREATE_LINK_API_KEY"); expectedKey != "" {
+			providedKey := r.Header.Get("X-API-Key")
+			if subtle.ConstantTimeCompare([]byte(providedKey), []byte(expectedKey)) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
-		// A successful first Decode does not rule out another value or trailing junk.
-		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+
+		r.Body = http.MaxBytesReader(w, r.Body, maxCreateLinkBodyBytes)
+		req, err := decodeCreateLinkRequest(r.Body)
+		if err != nil {
 			writeJSONRequestError(w, err)
 			return
 		}
@@ -262,6 +266,47 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 	})
 
 	return mux
+}
+
+func decodeCreateLinkRequest(body io.Reader) (CreateLinkRequest, error) {
+	decoder := json.NewDecoder(body)
+	invalid := errors.New("expected an object containing exactly one url string")
+	opening, err := decoder.Token()
+	if err != nil {
+		return CreateLinkRequest{}, err
+	}
+	if opening != json.Delim('{') {
+		return CreateLinkRequest{}, invalid
+	}
+	name, err := decoder.Token()
+	if err != nil {
+		return CreateLinkRequest{}, err
+	}
+	if name != "url" {
+		return CreateLinkRequest{}, invalid
+	}
+	var value *string
+	if err := decoder.Decode(&value); err != nil {
+		return CreateLinkRequest{}, err
+	}
+	if value == nil {
+		return CreateLinkRequest{}, invalid
+	}
+	// Inspect the closing token: struct decoding accepts duplicate and folded keys.
+	closing, err := decoder.Token()
+	if err != nil {
+		return CreateLinkRequest{}, err
+	}
+	if closing != json.Delim('}') {
+		return CreateLinkRequest{}, invalid
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = invalid
+		}
+		return CreateLinkRequest{}, err
+	}
+	return CreateLinkRequest{URL: *value}, nil
 }
 
 func writeJSONRequestError(w http.ResponseWriter, err error) {

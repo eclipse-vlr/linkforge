@@ -77,6 +77,13 @@ func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 		{"REDIS_URL", "https://user:secret@localhost:6379"},
 		{"REDIS_URL", "redis://user:secret%zz@localhost:6379"},
 		{"REDIS_URL", "redis://localhost:6379/not-a-db"},
+		{"REDIS_URL", "redis://localhost:0/0"},
+		{"REDIS_URL", "redis://localhost:65536/0"},
+		{"REDIS_URL", "redis://localhost:/0"},
+		{"REDIS_URL", "redis://localhost:6379/-1"},
+		{"REDIS_URL", "redis://localhost:6379/0?db=-1"},
+		{"REDIS_URL", "redis://user:secret@localhost:6379/0#fragment"},
+		{"REDIS_URL", "redis://localhost:6379/0#"},
 		{"REDIS_TIMEOUT", "0s"},
 		{"REDIS_TIMEOUT", "-1ms"},
 		{"REDIS_TIMEOUT", "100"},
@@ -106,5 +113,27 @@ func TestRunRejectsConfigBeforeDatabaseStartup(t *testing.T) {
 	t.Setenv("SHUTDOWN_TIMEOUT", "-1s")
 	if err := run(newTestLogger()); err == nil || !strings.Contains(err.Error(), "load config: SHUTDOWN_TIMEOUT") {
 		t.Fatalf("expected config error before database connection, got %v", err)
+	}
+}
+
+func TestLoadConfigAcceptsValidRedisURLs(t *testing.T) {
+	for _, connectionURL := range []string{
+		"redis://localhost",
+		"redis:///1",
+		"redis://[::1]:1/0",
+		"redis://localhost:65535/1",
+		"rediss://user:password@cache:6379/1?db=2",
+	} {
+		t.Run(connectionURL, func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("REDIS_URL", connectionURL)
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.RedisURL != connectionURL {
+				t.Fatalf("REDIS_URL changed: %q", cfg.RedisURL)
+			}
+		})
 	}
 }

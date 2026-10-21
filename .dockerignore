@@ -1,0 +1,12 @@
+.git
+.github
+.vscode
+.idea
+.env
+.env.*
+*.log
+*.exe
+*.zip
+build
+dist
+docs
