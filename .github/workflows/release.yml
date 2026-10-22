@@ -1,0 +1,104 @@
+name: Prepare draft release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Версия выпуска
+        type: choice
+        options: [v0.1.0]
+        default: v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: linkforge
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: linkforge
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U linkforge -d linkforge"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://linkforge:devpassword@127.0.0.1:5432/linkforge?sslmode=disable
+      REDIS_URL: redis://127.0.0.1:6379/0
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_DIRECTORY: /tmp/linkforge-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Require passing CI for this commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          repository, commit = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_SHA']
+          response = subprocess.check_output([
+              'gh', 'api', f'repos/{repository}/actions/workflows/go.yml/runs',
+              '--method', 'GET', '-f', f'head_sha={commit}', '-f', 'branch=master', '-f', 'event=push'
+          ], text=True)
+          runs = json.loads(response)['workflow_runs']
+          assert runs, 'Run Go CI on this commit before preparing the release'
+          latest = max(runs, key=lambda run: run['id'])
+          assert latest['status'] == 'completed' and latest['conclusion'] == 'success', (
+              'Wait for passing Go CI before preparing the release: ' + latest['html_url'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('url=' + latest['html_url'] + '\n')
+          PY
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and verify all distributions
+        env:
+          CI_URL: ${{ steps.ci.outputs.url }}
+        run: |
+          python3 scripts/prepare_release.py --version "$RELEASE_VERSION" \
+            --output "$RELEASE_DIRECTORY" --ci-url "$CI_URL"
+      - name: Preserve verified distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: linkforge-${{ inputs.version }}
+          path: ${{ env.RELEASE_DIRECTORY }}/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload and verify draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/upload_release.py --version "$RELEASE_VERSION" \
+            --directory "$RELEASE_DIRECTORY"
