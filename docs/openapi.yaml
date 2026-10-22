@@ -3,12 +3,11 @@ info:
   title: LinkForge API
   version: 0.1.0
   description: |
-    Документация текущего HTTP API LinkForge, сверенная с обработчиками в cmd/api/main.go.
-    Версия здесь относится к спецификации, а не к опубликованному GitHub Release.
-    Ошибки стандартного net/http возвращаются текстом, а не JSON.
+    API создаёт короткие ссылки, перенаправляет по ним и показывает число переходов.
+    Ответы с данными приходят в JSON, ошибки — обычным текстом.
 servers:
   - url: http://localhost:8080
-    description: Локальный запуск (BASE_URL и HTTP_ADDR могут быть изменены)
+    description: Адрес API при запуске на компьютере
 tags:
   - name: Сервис
   - name: Ссылки
@@ -16,12 +15,12 @@ paths:
   /healthz:
     get:
       tags: [Сервис]
-      summary: Проверить работу HTTP-процесса
-      description: Не проверяет доступность PostgreSQL или Redis.
+      summary: Проверить, что сервер отвечает
+      description: Показывает работу HTTP-сервера. Подключение к базе и кешу не проверяется.
       operationId: healthz
       responses:
         '200':
-          description: HTTP-процесс отвечает
+          description: Сервер работает
           content:
             application/json:
               schema:
@@ -36,15 +35,13 @@ paths:
       summary: Создать короткую ссылку
       operationId: createLink
       description: |
-        Запрос принимает ровно один JSON-объект с полем url.
-        Неизвестные поля и данные после JSON отклоняются.
-        Поле url регистрозависимо и должно встречаться ровно один раз.
-        URL обрезается по краям от пробелов; допускается абсолютный HTTP/HTTPS URL.
-        Не более 4096 байт в URL и 16384 байт во всём теле запроса.
-        На создание действует лимит 10 запросов за 60 секунд с IP.
-        Ошибочные запросы также учитываются лимитером.
-        Если задана переменная CREATE_LINK_API_KEY, требуется заголовок X-API-Key.
-        Если переменная не задана, этот маршрут не требует ключа.
+        Передай один JSON-объект с единственным полем url в нижнем регистре.
+        Повторяющиеся поля, лишние поля и данные после объекта отклоняются.
+        В url нужен полный HTTP/HTTPS-адрес; пробелы по краям убираются.
+        Адрес должен укладываться в 4096 байт, всё тело запроса — в 16 КиБ.
+        С одного IP можно отправить 10 запросов за 60 секунд; ошибочные тоже считаются.
+        Если на сервере задана CREATE_LINK_API_KEY, добавь её значение в X-API-Key.
+        Без этой настройки ключ не нужен.
       security:
         - {}
         - CreateLinkApiKey: []
@@ -72,7 +69,7 @@ paths:
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
         '401':
-          description: Отсутствует или неверен X-API-Key, если включена опциональная авторизация
+          description: Нужен верный X-API-Key, поскольку на сервере задана CREATE_LINK_API_KEY
           content:
             text/plain:
               schema:
@@ -80,10 +77,10 @@ paths:
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '429':
-          description: Превышен лимит создания ссылок с IP
+          description: С этого IP уже отправлено слишком много запросов на создание ссылок
           headers:
             Retry-After:
-              description: Рекомендуемая задержка до следующей попытки (в секундах)
+              description: Через сколько секунд повторить запрос
               schema:
                 type: string
           content:
@@ -93,10 +90,10 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
-          description: Лимитер не может принять новый IP (в том числе при переполнении таблицы адресов)
+          description: Лимитер не может обработать новый IP-адрес, например когда заполнен список адресов
           headers:
             Retry-After:
-              description: Задержка до повтора
+              description: Через сколько секунд повторить запрос
               schema:
                 type: string
           content:
@@ -106,14 +103,14 @@ paths:
   /api/v1/links/{code}/stats:
     get:
       tags: [Ссылки]
-      summary: Статистика переходов
+      summary: Посмотреть число переходов
       operationId: getLinkStats
-      description: Статистика публичная и включает повторные обращения и ботов.
+      description: Доступна без ключа. Повторные переходы и боты тоже считаются.
       parameters:
         - $ref: '#/components/parameters/Code'
       responses:
         '200':
-          description: Статистика найдена
+          description: Код ссылки и число переходов
           content:
             application/json:
               schema:
@@ -130,17 +127,17 @@ paths:
   /{code}:
     get:
       tags: [Ссылки]
-      summary: Перенаправить по короткому коду
+      summary: Открыть исходную ссылку
       operationId: redirectLink
       description: |
-        Возвращает 302 с Location исходной ссылки.
-        Ошибка сохранения счётчика не блокирует редирект.
-        Следование редиректу зависит от HTTP-клиента.
+        Возвращает 302 и исходный адрес в заголовке Location.
+        Если сохранить счётчик не удалось, переход всё равно сработает.
+        Браузер обычно открывает адрес сам; поведение других клиентов зависит от их настроек.
       parameters:
         - $ref: '#/components/parameters/Code'
       responses:
         '302':
-          description: Перенаправление
+          description: Можно перейти по адресу из Location
           headers:
             Location:
               description: Исходный URL
@@ -160,7 +157,7 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
-      description: Требуется только при установленной CREATE_LINK_API_KEY.
+      description: Передавай ключ, если на сервере задана CREATE_LINK_API_KEY.
   parameters:
     Code:
       name: code
@@ -184,7 +181,7 @@ components:
       properties:
         url:
           type: string
-          description: Абсолютный HTTP/HTTPS URL; ограничение 4096 байт проверяется сервером
+          description: Полный HTTP/HTTPS-адрес длиной до 4096 байт; длину проверяет сервер
           example: https://example.com/article
     CreateLinkResponse:
       type: object
@@ -214,7 +211,7 @@ components:
           minimum: 0
   responses:
     BadRequest:
-      description: Ошибка в JSON или некорректный URL
+      description: Проверь JSON и адрес в поле url
       content:
         text/plain:
           schema:
@@ -226,16 +223,16 @@ components:
           schema:
             type: string
     NotFound:
-      description: Код не найден
+      description: Ссылки с таким кодом нет
       content:
         text/plain:
           schema:
             type: string
     MethodNotAllowed:
-      description: Метод не поддерживается
+      description: Для этого адреса нужен другой HTTP-метод
       headers:
         Allow:
-          description: Разрешённый HTTP-метод
+          description: Какой HTTP-метод можно использовать
           schema:
             type: string
       content:
@@ -243,7 +240,7 @@ components:
           schema:
             type: string
     InternalError:
-      description: Внутренняя ошибка
+      description: На сервере произошла ошибка; подробности есть в логах
       content:
         text/plain:
           schema:
