@@ -17,18 +17,32 @@
 
 ## Как запустить
 
-Нужны Git, Go версии из [`go.mod`](go.mod) и Docker с Compose. Команды подходят для Linux, macOS и Windows PowerShell:
+Нужны Git и Docker с Compose. Все сервисы запускаются в контейнерах; устанавливать Go для этого не нужно. Команды подходят для Linux, macOS и Windows PowerShell:
 
 ```bash
 git clone https://github.com/eclipse-vlr/linkforge.git
 cd linkforge
+docker compose up -d --build
+```
+
+API будет доступен на `http://localhost:8080`. Compose подключает PostgreSQL и Redis, миграции включены в образ. Логи приложения: `docker compose logs -f api`. Остановка сервисов: `docker compose stop`.
+
+<details>
+<summary>Запуск API на компьютере для разработки</summary>
+
+Нужен Go версии из [`go.mod`](go.mod). Выполни из корня проекта:
+
+```bash
+docker compose stop api
 docker compose up -d --wait db
 go run ./cmd/api
 ```
 
-API будет доступен на `http://localhost:8080`. Запускай его из корня проекта — там лежат миграции. Для этого примера используются локальные настройки PostgreSQL по умолчанию, без Redis.
+Без `REDIS_URL` приложение работает только с PostgreSQL. При запуске через `go run` файл `.env` автоматически не читается.
 
-Redis подключается через `REDIS_URL`, а защита создания ссылок — через `CREATE_LINK_API_KEY`. Переменные задаются в окружении; `.env` автоматически не читается.
+</details>
+
+Защита создания ссылок включается через `CREATE_LINK_API_KEY`; Compose передаёт эту переменную в контейнер API. По умолчанию ключ не задан.
 
 ## Пример запроса
 
