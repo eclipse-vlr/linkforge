@@ -22,6 +22,26 @@ def reference(kind="commit", sha=COMMIT, version=VERSION):
     return {"ref": f"refs/tags/{version}", "object": {"type": kind, "sha": sha}}
 
 
+class ReleaseNotesTests(unittest.TestCase):
+    def test_notes_are_ready_for_a_release_page(self):
+        for status in ("> Кандидат в первый релиз.", "> Опубликован 23 октября 2026 года."):
+            with self.subTest(status=status):
+                source = (f"# LinkForge {VERSION}\n\n{status}\n\n"
+                          "[Описание API](openapi.yaml).\n\n"
+                          "[Go](https://go.dev/).\n\n"
+                          "## Ограничения\n\nСтатистика публичная.\n\n"
+                          "## Подготовка и публикация\n\nСлужебная инструкция.")
+                notes = upload_release.prepare_release_notes(source, REPOSITORY, COMMIT)
+                self.assertIn(
+                    f"[Описание API](https://github.com/{REPOSITORY}/blob/{COMMIT}/docs/openapi.yaml)",
+                    notes)
+                self.assertIn("[Go](https://go.dev/)", notes)
+                self.assertIn("Статистика публичная.", notes)
+                self.assertNotIn(status, notes)
+                self.assertNotIn("Служебная инструкция", notes)
+                self.assertNotIn("## Подготовка и публикация", notes)
+
+
 class ReleaseTagTests(unittest.TestCase):
     def test_missing_tag_and_prefix_only_are_allowed(self):
         for refs in ([], [reference(sha=OTHER_COMMIT, version=VERSION + "-rc1")]):
