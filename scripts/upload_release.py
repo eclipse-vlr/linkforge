@@ -32,6 +32,16 @@ def verify_release_tag(repository, version, commit):
         raise RuntimeError(f"Release tag {version} does not resolve to {commit}; refusing to use it")
 
 
+def prepare_release_notes(notes, repository, commit):
+    # Exclude the repository-only status banner and publication procedure.
+    notes = "\n".join(line for line in notes.splitlines()
+                      if not line.startswith(("> Кандидат", "> Опубликован")))
+    notes = notes.split("## Подготовка и публикация")[0].rstrip()
+    # Relative repository links do not resolve from a GitHub release page.
+    openapi_url = f"https://github.com/{repository}/blob/{commit}/docs/openapi.yaml"
+    return notes.replace("](openapi.yaml)", f"]({openapi_url})")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
@@ -59,9 +69,7 @@ def main():
             "A draft with assets already targets another commit")
     verify_release_tag(repository, args.version, commit)
     notes = (SOURCE / "docs" / f"release-{args.version}.md").read_text()
-    # Exclude the repository-only status banner and publication procedure.
-    notes = "\n".join(line for line in notes.splitlines() if not line.startswith("> Кандидат"))
-    notes = notes.split("## Подготовка и публикация")[0].rstrip()
+    notes = prepare_release_notes(notes, repository, commit)
     notes += (f"\n\n## Дистрибутивы и подтверждение сборки\n\n"
               f"Linux и macOS: amd64/arm64; Windows: amd64. Инструкция и миграции включены в архивы.\n\n"
               f"Исходники: `{commit}`. [Go CI]({verification['go_ci']}). "
