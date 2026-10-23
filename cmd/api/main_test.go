@@ -3,13 +3,25 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	// Authorization tests set their own key with t.Setenv. Ignore the developer's
+	// environment so ordinary HTTP tests always start with authentication off.
+	if err := os.Unsetenv("CREATE_LINK_API_KEY"); err != nil {
+		fmt.Fprintln(os.Stderr, "clear test API key:", err)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
 
 func TestHealthz(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)

@@ -82,6 +82,11 @@ func TestLoadConfigRejectsInvalidValues(t *testing.T) {
 		{"REDIS_URL", "redis://localhost:/0"},
 		{"REDIS_URL", "redis://localhost:6379/-1"},
 		{"REDIS_URL", "redis://localhost:6379/0?db=-1"},
+		{"REDIS_URL", "redis://localhost:6379/0?pool_size=-1"},
+		{"REDIS_URL", "redis://localhost:6379/0?pool_size=2147483648"},
+		{"REDIS_URL", "redis://localhost:6379/0?pipeline_write_buffer_size=-1"},
+		{"REDIS_URL", "redis://localhost:6379/0?db=0&db=1"},
+		{"REDIS_URL", "redis://user:secret@localhost:6379/0?db=%zz"},
 		{"REDIS_URL", "redis://user:secret@localhost:6379/0#fragment"},
 		{"REDIS_URL", "redis://localhost:6379/0#"},
 		{"REDIS_TIMEOUT", "0s"},
@@ -113,6 +118,15 @@ func TestRunRejectsConfigBeforeDatabaseStartup(t *testing.T) {
 	t.Setenv("SHUTDOWN_TIMEOUT", "-1s")
 	if err := run(newTestLogger()); err == nil || !strings.Contains(err.Error(), "load config: SHUTDOWN_TIMEOUT") {
 		t.Fatalf("expected config error before database connection, got %v", err)
+	}
+}
+
+func TestRunRejectsRedisOptionsBeforeDatabaseStartup(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://user:password@127.0.0.1:1/unavailable")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0?pool_size=-1")
+	if err := run(newTestLogger()); err == nil || !strings.Contains(err.Error(), "load config: REDIS_URL") {
+		t.Fatalf("run with invalid Redis options = %v, want REDIS_URL config error before database connection", err)
 	}
 }
 

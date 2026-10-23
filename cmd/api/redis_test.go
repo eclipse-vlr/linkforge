@@ -3,9 +3,38 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestNewRedisClientRejectsInvalidURL(t *testing.T) {
+	for _, connectionURL := range []string{
+		"redis://user:secret@localhost:6379/0?pool_size=-1",
+		"redis://localhost:6379/0?pool_size=2147483648",
+		"redis://localhost:6379/0?pool_size=10",
+		"redis://localhost:6379/0?pipeline_write_buffer_size=-1",
+		"redis://localhost:6379/0?db=0&db=1",
+		"redis://localhost:6379/0?db=0&d%62=1",
+		"redis://localhost:6379/0?db=%zz",
+		"redis://localhost:6379/0?secret=value",
+		"redis://localhost:6379/-1",
+	} {
+		t.Run(connectionURL, func(t *testing.T) {
+			client, err := newRedisClient(connectionURL, time.Second)
+			if client != nil {
+				_ = client.Close()
+				t.Fatal("newRedisClient with invalid URL returned a client")
+			}
+			if err == nil || !strings.Contains(err.Error(), "REDIS_URL") {
+				t.Fatalf("newRedisClient(%q) = %v, want REDIS_URL error", connectionURL, err)
+			}
+			if strings.Contains(err.Error(), "secret") {
+				t.Fatalf("newRedisClient exposed credentials in error: %v", err)
+			}
+		})
+	}
+}
 
 func TestRedisConnection(t *testing.T) {
 	connectionURL := os.Getenv("TEST_REDIS_URL")

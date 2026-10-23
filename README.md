@@ -80,6 +80,7 @@ go vet ./...
 
 ## Подробнее
 
+- [Демонстрация на собеседовании](docs/demo.md)
 - [Описание API](docs/api.md)
 - [Запуск готовой сборки](docs/running-binary.md)
 - [Docker и развёртывание](docs/deployment.md)

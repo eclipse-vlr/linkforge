@@ -17,6 +17,21 @@ def gh(*args):
     return subprocess.check_output(["gh", *args], cwd=SOURCE, text=True).strip()
 
 
+def verify_release_tag(repository, version, commit):
+    # matching-refs returns [] for a missing tag; access/network failures still
+    # raise an error. Filter exactly because the endpoint also matches prefixes.
+    references = json.loads(gh("api", f"repos/{repository}/git/matching-refs/tags/{version}"))
+    reference = next((ref for ref in references if ref["ref"] == f"refs/tags/{version}"), None)
+    if reference is None:
+        return  # A draft may have no tag until it is published.
+    target = reference["object"]
+    while target["type"] == "tag":
+        tag = json.loads(gh("api", f"repos/{repository}/git/tags/{target['sha']}"))
+        target = tag["object"]
+    if target["type"] != "commit" or target["sha"] != commit:
+        raise RuntimeError(f"Release tag {version} does not resolve to {commit}; refusing to use it")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
@@ -42,6 +57,7 @@ def main():
         assert release["draft"], "Refusing to modify a published release"
         assert release["target_commitish"] == commit or not release["assets"], (
             "A draft with assets already targets another commit")
+    verify_release_tag(repository, args.version, commit)
     notes = (SOURCE / "docs" / f"release-{args.version}.md").read_text()
     # Exclude the repository-only status banner and publication procedure.
     notes = "\n".join(line for line in notes.splitlines() if not line.startswith("> Кандидат"))
@@ -71,6 +87,7 @@ def main():
     actual = {asset["name"]: (asset["size"], asset["digest"]) for asset in remote["assets"]
               if asset["state"] == "uploaded"}
     assert actual == expected, "Remote assets or their checksums differ"
+    verify_release_tag(repository, args.version, commit)
     print(f"Verified {len(actual)} assets: {remote['html_url']}")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:

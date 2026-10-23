@@ -59,7 +59,12 @@ jobs:
         run: go mod download
 
       - name: Run tests
+        env:
+          CREATE_LINK_API_KEY: ci-inherited-test-key
         run: go test -race -count=1 -v ./...
+
+      - name: Test release uploader
+        run: python3 -B -m unittest discover -s scripts -p 'test_*.py' -v
 
       - name: Run go vet
         run: go vet ./...

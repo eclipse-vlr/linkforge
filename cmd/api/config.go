@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 type Config struct {
@@ -61,16 +59,8 @@ func loadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("SHUTDOWN_TIMEOUT must be a positive duration, for example 10s")
 	}
 	if cfg.RedisURL != "" {
-		parsedRedis, parseErr := url.Parse(cfg.RedisURL)
-		if parseErr != nil || (parsedRedis.Scheme != "redis" && parsedRedis.Scheme != "rediss") {
-			return Config{}, fmt.Errorf("REDIS_URL must use the redis or rediss scheme")
-		}
-		if (parsedRedis.Port() != "" && !validPort(parsedRedis.Port())) || strings.HasSuffix(parsedRedis.Host, ":") || strings.Contains(cfg.RedisURL, "#") {
-			return Config{}, fmt.Errorf("REDIS_URL must have a valid port and no fragment")
-		}
-		options, err := redis.ParseURL(cfg.RedisURL)
-		if err != nil || options.DB < 0 {
-			return Config{}, fmt.Errorf("REDIS_URL must be a valid redis or rediss connection URL with a non-negative database number")
+		if _, err := parseRedisOptions(cfg.RedisURL); err != nil {
+			return Config{}, err
 		}
 	}
 	cfg.RedisTimeout, err = time.ParseDuration(envOrDefault("REDIS_TIMEOUT", "100ms"))
