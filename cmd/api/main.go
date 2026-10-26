@@ -23,6 +23,7 @@ import (
 const (
 	maxCreateLinkBodyBytes = 16 * 1024
 	maxURLBytes            = 4096
+	shortCodeLength        = 8
 )
 
 type CreateLinkRequest struct {
@@ -44,12 +45,11 @@ type LinkRepository interface {
 
 func generateCode() (string, error) {
 	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	const codeLength = 8
 
 	var code strings.Builder
-	code.Grow(codeLength)
+	code.Grow(shortCodeLength)
 
-	for i := 0; i < codeLength; i++ {
+	for i := 0; i < shortCodeLength; i++ {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
 		if err != nil {
 			return "", err
@@ -59,6 +59,18 @@ func generateCode() (string, error) {
 	}
 
 	return code.String(), nil
+}
+
+func validCode(code string) bool {
+	if len(code) != shortCodeLength {
+		return false
+	}
+	for _, c := range code {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func validateURL(raw string) error {
@@ -208,9 +220,14 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		code := r.PathValue("code")
+		if !validCode(code) {
+			http.NotFound(w, r)
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
-		stats, err := store.GetStats(ctx, r.PathValue("code"))
+		stats, err := store.GetStats(ctx, code)
 		if err != nil {
 			if errors.Is(err, ErrLinkNotFound) {
 				http.NotFound(w, r)
@@ -235,7 +252,7 @@ func newRouter(store LinkRepository, logger *slog.Logger, baseURL string) http.H
 
 		code := strings.TrimPrefix(r.URL.Path, "/")
 
-		if code == "" || strings.Contains(code, "/") {
+		if !validCode(code) {
 			http.NotFound(w, r)
 			return
 		}

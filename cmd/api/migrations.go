@@ -56,10 +56,12 @@ func applyMigrations(parent context.Context, sourceURL, databaseURL string) (res
 		result = errors.Join(result, ctxErr, cancellationErr)
 	}()
 
-	config, err := pgx.ParseConfig(databaseURL)
+	poolConfig, err := parsePostgresPoolConfig(databaseURL)
 	if err != nil {
 		return fmt.Errorf("invalid migration database configuration")
 	}
+	// Match repository URL parsing without sending pool options to PostgreSQL.
+	config := poolConfig.ConnConfig
 	if err := ctx.Err(); err != nil {
 		return err
 	}

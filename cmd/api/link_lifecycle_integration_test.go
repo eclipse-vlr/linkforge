@@ -61,6 +61,10 @@ func TestLinkLifecycleIntegration(t *testing.T) {
 	}
 	query := parsed.Query()
 	query.Set("search_path", quotedSchema)
+	// Both migrations and the repository must accept the same pool options.
+	query.Set("pool_max_conns", "4")
+	query.Set("pool_min_conns", "1")
+	query.Set("pool_max_conn_lifetime", "5m")
 	parsed.RawQuery = query.Encode()
 	if err := applyMigrations(ctx, "file://../../migrations", parsed.String()); err != nil {
 		t.Fatal(err)
@@ -70,6 +74,9 @@ func TestLinkLifecycleIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	if got := store.pool.Config().MaxConns; got != 4 {
+		t.Fatalf("pool MaxConns = %d, want 4", got)
+	}
 
 	// A separate client can clean up owned keys even after the cache client closes.
 	redisAdmin, err := newRedisClient(redisURL, time.Second)
