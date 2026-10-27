@@ -23,7 +23,7 @@ func NewPostgresStore(
 	ctx context.Context,
 	connString string,
 ) (*PostgresStore, error) {
-	config, err := pgxpool.ParseConfig(connString)
+	config, err := parsePostgresPoolConfig(connString)
 	if err != nil {
 		return nil, fmt.Errorf("parse database config: %w", err)
 	}
@@ -120,4 +120,16 @@ func (s *PostgresStore) GetStats(ctx context.Context, code string) (LinkStats, e
 		return LinkStats{}, fmt.Errorf("select link stats: %w", err)
 	}
 	return stats, nil
+}
+
+func parsePostgresPoolConfig(connString string) (*pgxpool.Config, error) {
+	config, err := pgxpool.ParseConfig(connString)
+	if err != nil {
+		return nil, err
+	}
+	// pgxpool starts a ticker with this period; non-positive values panic.
+	if config.HealthCheckPeriod <= 0 {
+		return nil, fmt.Errorf("pool_health_check_period must be a positive duration")
+	}
+	return config, nil
 }
