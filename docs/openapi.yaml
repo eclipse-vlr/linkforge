@@ -166,6 +166,9 @@ components:
       required: true
       schema:
         type: string
+        minLength: 8
+        maxLength: 8
+        pattern: '^[a-zA-Z0-9]{8}$'
   schemas:
     HealthResponse:
       type: object
