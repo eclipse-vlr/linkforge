@@ -36,6 +36,15 @@ def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
+def write_distribution_docs(directory, notes):
+    for source, target in [(SOURCE / "docs/running-binary.md", "README.md"),
+                           (SOURCE / "docs/openapi.yaml", "openapi.yaml")]:
+        shutil.copyfile(source, directory / target)
+    # The repository keeps the spec in docs/; distributions place it at their root.
+    notes = notes.replace("](docs/openapi.yaml)", "](openapi.yaml)")
+    (directory / "RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
+
+
 def pack(directory, output, timestamp, windows=False):
     files = sorted(path for path in directory.rglob("*") if path.is_file())
     expected = {f"{directory.name}/{p.relative_to(directory).as_posix()}": p.read_bytes()
@@ -170,10 +179,7 @@ def main():
             for field in (go_version, f"GOOS={system}", f"GOARCH={arch}",
                           f"vcs.revision={commit}", "vcs.modified=false"):
                 require(field in metadata, f"Missing binary build metadata: {field}")
-            for source, target in [(SOURCE / "docs/running-binary.md", "README.md"),
-                                   (SOURCE / "docs/openapi.yaml", "openapi.yaml")]:
-                shutil.copyfile(source, directory / target)
-            (directory / "RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
+            write_distribution_docs(directory, notes)
             (directory / "RELEASE_COMMIT").write_text(commit + "\n")
             shutil.copytree(SOURCE / "migrations", directory / "migrations")
             archive = output / (name + (".zip" if system == "windows" else ".tar.gz"))

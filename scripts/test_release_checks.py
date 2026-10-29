@@ -3,10 +3,13 @@
 import json
 import os
 from pathlib import Path
+import re
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 import prepare_release
 import upload_release
@@ -17,6 +20,33 @@ COMMIT = "a" * 40
 
 
 class ReleaseSafetyTests(unittest.TestCase):
+    def test_packaged_release_notes_resolve_their_local_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            (source / "docs").mkdir(parents=True)
+            (source / "docs/running-binary.md").write_text("Run the server.", encoding="utf-8")
+            (source / "docs/openapi.yaml").write_text("openapi: 3.0.3\n", encoding="utf-8")
+            bundle = Path(temporary) / "linkforge_v0.1.2"
+            bundle.mkdir()
+            with patch.object(prepare_release, "SOURCE", source):
+                prepare_release.write_distribution_docs(bundle, "# Release\n\n[OpenAPI](docs/openapi.yaml).\n")
+            for windows in (False, True):
+                with self.subTest(windows=windows):
+                    path = Path(temporary) / ("bundle.zip" if windows else "bundle.tar.gz")
+                    prepare_release.pack(bundle, path, 1760000000, windows=windows)
+                    if windows:
+                        with zipfile.ZipFile(path) as archive:
+                            contents = {name: archive.read(name) for name in archive.namelist()}
+                    else:
+                        with tarfile.open(path) as archive:
+                            contents = {item.name: archive.extractfile(item).read()
+                                        for item in archive.getmembers() if item.isfile()}
+                    notes = contents[bundle.name + "/RELEASE_NOTES.md"].decode("utf-8")
+                    targets = re.findall(r"\]\(([^)]+)\)", notes)
+                    self.assertEqual(len(targets), 1)
+                    for target in targets:
+                        self.assertIn(bundle.name + "/" + target, contents)
+
     def test_dirty_checkout_stops_before_build(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "source"
