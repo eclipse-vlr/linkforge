@@ -20,6 +20,8 @@ import urllib.error
 import urllib.request
 import zipfile
 
+from release_checks import release_notes, require
+
 
 SOURCE = Path(__file__).resolve().parents[1]
 PLATFORMS = [("linux", "amd64"), ("linux", "arm64"), ("windows", "amd64"),
@@ -32,6 +34,15 @@ def command(*args, **kwargs):
 
 def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def write_distribution_docs(directory, notes):
+    for source, target in [(SOURCE / "docs/running-binary.md", "README.md"),
+                           (SOURCE / "docs/openapi.yaml", "openapi.yaml")]:
+        shutil.copyfile(source, directory / target)
+    # The repository keeps the spec in docs/; distributions place it at their root.
+    notes = notes.replace("](docs/openapi.yaml)", "](openapi.yaml)")
+    (directory / "RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
 
 
 def pack(directory, output, timestamp, windows=False):
@@ -49,7 +60,7 @@ def pack(directory, output, timestamp, windows=False):
                 archive.writestr(item, data, compress_type=zipfile.ZIP_DEFLATED,
                                  compresslevel=9)
         with zipfile.ZipFile(output) as archive:
-            assert archive.testzip() is None
+            require(archive.testzip() is None, f"Corrupt ZIP archive: {output.name}")
             actual = {name: archive.read(name) for name in archive.namelist()}
     else:
         def normalize(info):
@@ -68,7 +79,7 @@ def pack(directory, output, timestamp, windows=False):
         with tarfile.open(output) as archive:
             actual = {item.name: archive.extractfile(item).read()
                       for item in archive.getmembers() if item.isfile()}
-    assert actual == expected, f"Archive contents differ: {output.name}"
+    require(actual == expected, f"Archive contents differ: {output.name}")
 
 
 def verify_runtime(output, version):
@@ -105,7 +116,7 @@ def verify_runtime(output, version):
                 try:
                     urllib.request.urlopen(request, timeout=5).close()
                 except urllib.error.HTTPError as error:
-                    assert error.code == 401, error.code
+                    require(error.code == 401, f"Expected unauthorized creation to return 401, got {error.code}")
                 else:
                     raise AssertionError("Creation without an API key was accepted")
                 report_path = output / "benchmark-report.json"
@@ -113,13 +124,16 @@ def verify_runtime(output, version):
                                 "-requests", "500", "-workers", "10", "-out", str(report_path)],
                                cwd=SOURCE, env=env, check=True, timeout=120)
                 report = json.loads(report_path.read_text())
-                assert report["successful_redirects"] == report["total_requests"] == 500
-                assert report["unexpected_responses"] == report["network_errors"] == 0
+                require(report["successful_redirects"] == report["total_requests"] == 500,
+                        "The packaged server must complete all 500 redirects")
+                require(report["unexpected_responses"] == report["network_errors"] == 0,
+                        "The packaged server returned unexpected responses or network errors")
                 with urllib.request.urlopen(base + "/api/v1/links/" + report["created_code"] + "/stats",
                                             timeout=5) as response:
-                    assert json.load(response)["click_count"] == 500
+                    require(json.load(response)["click_count"] == 500,
+                            "The packaged server must persist all 500 clicks")
                 server.send_signal(signal.SIGTERM)
-                assert server.wait(timeout=20) == 0
+                require(server.wait(timeout=20) == 0, "The packaged server did not shut down successfully")
                 return {"authorization_status": 401, "successful_redirects": 500,
                         "persisted_click_count": 500, "shutdown_exit_code": 0}
             finally:
@@ -138,19 +152,17 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"v\d+\.\d+\.\d+", args.version):
         parser.error("Version must use vMAJOR.MINOR.PATCH")
-    notes = SOURCE / "docs" / f"release-{args.version}.md"
-    if not notes.is_file():
-        parser.error(f"Missing release notes: {notes.name}")
+    notes = release_notes(SOURCE, args.version)
     output = args.output.resolve()
     if output == SOURCE or SOURCE in output.parents:
         parser.error("Output must be outside the source checkout")
-    assert not command("git", "status", "--porcelain"), "Source checkout must be clean"
+    require(not command("git", "status", "--porcelain"), "Source checkout must be clean")
     output.mkdir(parents=True, exist_ok=False)
     commit = command("git", "rev-parse", "HEAD")
     timestamp = int(command("git", "show", "-s", "--format=%ct", "HEAD"))
     go_version = command("go", "env", "GOVERSION")
     expected_go = "go" + re.search(r"^go (\S+)$", (SOURCE / "go.mod").read_text(), re.M)[1]
-    assert go_version == expected_go, (go_version, expected_go)
+    require(go_version == expected_go, f"Go version {go_version} differs from required {expected_go}")
     builds = []
     with tempfile.TemporaryDirectory(prefix="linkforge-build-") as temporary:
         for system, arch in PLATFORMS:
@@ -166,11 +178,8 @@ def main():
             metadata = command("go", "version", "-m", str(binary))
             for field in (go_version, f"GOOS={system}", f"GOARCH={arch}",
                           f"vcs.revision={commit}", "vcs.modified=false"):
-                assert field in metadata, field
-            for source, target in [(SOURCE / "docs/running-binary.md", "README.md"),
-                                   (notes, "RELEASE_NOTES.md"),
-                                   (SOURCE / "docs/openapi.yaml", "openapi.yaml")]:
-                shutil.copyfile(source, directory / target)
+                require(field in metadata, f"Missing binary build metadata: {field}")
+            write_distribution_docs(directory, notes)
             (directory / "RELEASE_COMMIT").write_text(commit + "\n")
             shutil.copytree(SOURCE / "migrations", directory / "migrations")
             archive = output / (name + (".zip" if system == "windows" else ".tar.gz"))
@@ -187,6 +196,7 @@ def main():
                                                "go_version": go_version, "platforms": builds})
     runtime = verify_runtime(output, args.version)
     write_json(output / "verification.json", {"source_commit": commit, "go_ci": args.ci_url,
+                                              "http_benchmark_ci": os.environ.get("BENCHMARK_CI_URL", ""),
                                               "archive_contents_verified": True,
                                               "linux_amd64_smoke": runtime})
     assets = sorted(output.iterdir())
