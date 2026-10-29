@@ -19,3 +19,5 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 )
+
+replace github.com/golang-migrate/migrate/v4 => github.com/eclipse-vlr/golang-migrate/v4 v4.20.2-0.20261029125209-220f6d3de288

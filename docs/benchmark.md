@@ -33,6 +33,6 @@ go run ./cmd/loadtest -base http://127.0.0.1:8080 -requests 500 -workers 10 -out
 
 [HTTP benchmark](../.github/workflows/benchmark.yml) поднимает PostgreSQL и Redis, запускает API и выполняет те же 500 запросов в 10 потоков. Он запускается при изменении API, миграций, зависимостей или самой утилиты. Его можно запустить вручную через **Actions → HTTP benchmark → Run workflow**.
 
-Отчёт лежит в артефакте `linkforge-benchmark` и хранится 14 дней. В [проверке Linux-сборки кандидата v0.1.0](https://github.com/eclipse-vlr/linkforge/actions/runs/39737134697) прошли все 500 редиректов, без сетевых ошибок и неожиданных ответов. Код кандидата — `a4a1d95`.
+Отчёт лежит в артефакте `linkforge-benchmark` и хранится 14 дней. Отчёт проверки готовой Linux-сборки также приложен к [релизам](https://github.com/eclipse-vlr/linkforge/releases). Для сравнения результатов используй коммит и параметры из отчёта.
 
 Замеры на GitHub Actions могут отличаться от результатов на твоём компьютере. По ним нельзя судить о скорости будущего публичного сервера.
