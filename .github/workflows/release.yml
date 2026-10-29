@@ -93,7 +93,7 @@ jobs:
           CI_URL: ${{ steps.ci.outputs.url }}
           BENCHMARK_CI_URL: ${{ steps.ci.outputs.benchmark_url }}
         run: |
-          python3 scripts/prepare_release.py --version "$RELEASE_VERSION" \
+          python3 -B scripts/prepare_release.py --version "$RELEASE_VERSION" \
             --output "$RELEASE_DIRECTORY" --ci-url "$CI_URL"
       - name: Preserve verified distributions
         uses: actions/upload-artifact@v7
@@ -106,5 +106,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 scripts/upload_release.py --version "$RELEASE_VERSION" \
+          python3 -B scripts/upload_release.py --version "$RELEASE_VERSION" \
             --directory "$RELEASE_DIRECTORY"
