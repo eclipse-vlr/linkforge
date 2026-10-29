@@ -78,14 +78,19 @@ go vet ./...
 
 Без `TEST_DATABASE_URL` и `TEST_REDIS_URL` соответствующие интеграционные тесты пропускаются. В [CI](.github/workflows/go.yml) они запускаются с настоящими PostgreSQL и Redis; там же проверяются гонки, уязвимости зависимостей и Docker-образ.
 
+Для проверки Docker-образа целиком есть `pwsh -File ./scripts/smoke.ps1` (PowerShell 7.2+). Скрипт создаёт отдельное окружение, проверяет API, кеш и остановку, затем удаляет свои демонстрационные данные.
+
 ## Подробнее
 
-- [Демонстрация на собеседовании](docs/demo.md)
 - [Описание API](docs/api.md)
 - [Запуск готовой сборки](docs/running-binary.md)
 - [Docker и развёртывание](docs/deployment.md)
 - [Нагрузочное тестирование](docs/benchmark.md)
-- [Подготовка релиза v0.1.1](docs/release-v0.1.1.md)
+- [История изменений](CHANGELOG.md)
+
+Код разделён по ответственности: `cmd/api` запускает приложение, `internal/app` управляет конфигурацией и остановкой, `internal/link` содержит логику ссылок, `internal/httpapi` — HTTP, `internal/storage` — PostgreSQL и Redis.
+
+Для миграций используется [форк golang-migrate](https://github.com/eclipse-vlr/golang-migrate/tree/fix/migration-resource-cleanup) с исправлением очистки ресурсов при ошибке. Точная ревизия закреплена в `go.mod`.
 
 Лимитер пока работает в памяти одного экземпляра, статистика публичная. Compose настроен для локальной разработки; для хостинга потребуются отдельные секреты и настройки доступа.
 

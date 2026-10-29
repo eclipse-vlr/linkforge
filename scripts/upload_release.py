@@ -9,6 +9,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+from release_checks import release_notes, require
+
 
 SOURCE = Path(__file__).resolve().parents[1]
 
@@ -39,7 +41,8 @@ def prepare_release_notes(notes, repository, commit):
     notes = notes.split("## Подготовка и публикация")[0].rstrip()
     # Relative repository links do not resolve from a GitHub release page.
     openapi_url = f"https://github.com/{repository}/blob/{commit}/docs/openapi.yaml"
-    return notes.replace("](openapi.yaml)", f"]({openapi_url})")
+    return notes.replace("](openapi.yaml)", f"]({openapi_url})").replace(
+        "](docs/openapi.yaml)", f"]({openapi_url})")
 
 
 def main():
@@ -50,25 +53,27 @@ def main():
     repository = os.environ["GITHUB_REPOSITORY"]
     commit = gh("api", f"repos/{repository}/commits/HEAD", "--jq", ".sha")
     local_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=SOURCE, text=True).strip()
-    assert commit == local_commit, "The default branch moved; prepare the new commit instead"
+    require(commit == local_commit, "The default branch moved; prepare the new commit instead")
     verification = json.loads((args.directory / "verification.json").read_text())
-    assert verification["source_commit"] == commit
+    require(verification["source_commit"] == commit, "Verification targets a different source commit")
     manifest = json.loads((args.directory / "build-manifest.json").read_text())
-    assert manifest["source_commit"] == commit and manifest["version"] == args.version
+    require(manifest["source_commit"] == commit and manifest["version"] == args.version,
+            "Build manifest targets a different source commit or version")
     subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=args.directory, check=True)
     assets = sorted(path for path in args.directory.iterdir() if path.is_file())
-    assert len(assets) == 10, "Expected five native archives, source, two manifests, benchmark and checksums"
+    require(len(assets) == 10,
+            "Expected five native archives, source, two manifests, benchmark and checksums")
     # List drafts through the API too: an unpublished tag may not exist yet.
     releases = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"))
     matches = [release for page in releases for release in page if release["tag_name"] == args.version]
-    assert len(matches) <= 1, "Multiple releases have the same tag"
+    require(len(matches) <= 1, "Multiple releases have the same tag")
     release = matches[0] if matches else None
     if release:
-        assert release["draft"], "Refusing to modify a published release"
-        assert release["target_commitish"] == commit or not release["assets"], (
-            "A draft with assets already targets another commit")
+        require(release["draft"], "Refusing to modify a published release")
+        require(release["target_commitish"] == commit or not release["assets"],
+                "A draft with assets already targets another commit")
     verify_release_tag(repository, args.version, commit)
-    notes = (SOURCE / "docs" / f"release-{args.version}.md").read_text()
+    notes = release_notes(SOURCE, args.version)
     notes = prepare_release_notes(notes, repository, commit)
     notes += (f"\n\n## Дистрибутивы и подтверждение сборки\n\n"
               f"Linux и macOS: amd64/arm64; Windows: amd64. Инструкция и миграции включены в архивы.\n\n"
@@ -89,12 +94,13 @@ def main():
     release = json.loads(gh("release", "view", args.version, "--repo", repository,
                             "--json", "apiUrl"))
     remote = json.loads(gh("api", release["apiUrl"]))
-    assert remote["draft"] and remote["target_commitish"] == commit
+    require(remote["draft"] and remote["target_commitish"] == commit,
+            "Uploaded release is published or targets another source commit")
     expected = {path.name: (path.stat().st_size, "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest())
                 for path in assets}
     actual = {asset["name"]: (asset["size"], asset["digest"]) for asset in remote["assets"]
               if asset["state"] == "uploaded"}
-    assert actual == expected, "Remote assets or their checksums differ"
+    require(actual == expected, "Remote assets or their checksums differ")
     verify_release_tag(repository, args.version, commit)
     print(f"Verified {len(actual)} assets: {remote['html_url']}")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

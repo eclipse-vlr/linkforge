@@ -5,5 +5,6 @@
 - Write README.md in Russian.
 - Keep README concise and natural.
 - Create a new Git branch for each development step.
+- Use short task-based branch names such as `fix/...`, `feature/...`, `release/...` or `docs/...`; never add a `codex/` prefix. Use an explicitly requested name and rename existing branches only when the user asks.
 - Do not rewrite existing Git history.
 - Use the caveman skill in ultra mode for chat replies in this project. Keep code, commit messages, and PR descriptions in normal language.

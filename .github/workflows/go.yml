@@ -64,7 +64,9 @@ jobs:
         run: go test -race -count=1 -v ./...
 
       - name: Test release uploader
-        run: python3 -B -m unittest discover -s scripts -p 'test_*.py' -v
+        run: |
+          python3 -B -m unittest discover -s scripts -p 'test_*.py' -v
+          python3 -O -B -m unittest discover -s scripts -p 'test_*.py' -v
 
       - name: Run go vet
         run: go vet ./...
@@ -94,7 +96,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          for i in {1..60}; do
+          for _ in {1..60}; do
             if curl -fsS http://127.0.0.1:18080/healthz; then
               break
             fi
@@ -124,6 +126,6 @@ jobs:
           status=$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:18080/$code")
           test "$status" = 302
           curl -fsS "http://127.0.0.1:18080/api/v1/links/$code/stats" \
-            | python3 -c 'import json,sys; assert json.load(sys.stdin)["click_count"] == 1'
+            | python3 -c 'import json,sys; count=json.load(sys.stdin)["click_count"]; sys.exit(0 if count == 1 else "Expected click_count=1")'
           docker stop --time 15 "$container_id" > /dev/null
           test "$(docker inspect -f '{{.State.ExitCode}}' "$container_id")" = 0
