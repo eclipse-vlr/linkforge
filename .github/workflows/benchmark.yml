@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - "cmd/**"
+      - "internal/**"
       - "migrations/**"
       - "go.mod"
       - "go.sum"
@@ -13,6 +14,7 @@ on:
     branches: [master]
     paths:
       - "cmd/**"
+      - "internal/**"
       - "migrations/**"
       - "go.mod"
       - "go.sum"
@@ -74,7 +76,7 @@ jobs:
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           ready=0
-          for i in {1..60}; do
+          for _ in {1..60}; do
             if curl --fail --silent http://127.0.0.1:8080/healthz > /dev/null; then
               ready=1
               break
