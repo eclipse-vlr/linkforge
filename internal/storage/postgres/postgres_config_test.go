@@ -4,7 +4,27 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestPoolConnectionTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		want  time.Duration
+	}{
+		{"", 5 * time.Second},
+		{"&connect_timeout=0", 5 * time.Second},
+		{"&connect_timeout=30", 30 * time.Second},
+	} {
+		config, err := parsePostgresPoolConfig("postgres://user:secret@localhost/db?sslmode=disable" + tc.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.ConnConfig.ConnectTimeout != tc.want {
+			t.Fatalf("%s: got %s, want %s", tc.query, config.ConnConfig.ConnectTimeout, tc.want)
+		}
+	}
+}
 
 func TestPostgresStoreRejectsInvalidPoolPeriod(t *testing.T) {
 	for _, period := range []string{"0s", "-1s"} {
