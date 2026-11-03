@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/eclipse-vlr/linkforge/internal/link"
 	"github.com/jackc/pgx/v5"
@@ -12,7 +13,8 @@ import (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool              *pgxpool.Pool
+	cancelConnections context.CancelFunc
 }
 
 func NewStore(
@@ -23,21 +25,38 @@ func NewStore(
 	if err != nil {
 		return nil, fmt.Errorf("parse database config: %w", err)
 	}
+	// The caller's context bounds startup only. The store owns connections until
+	// Close, including constructors that pgxpool starts with a background context.
+	connections, cancelConnections := context.WithCancel(context.Background())
+	stopStartupCancellation := context.AfterFunc(ctx, cancelConnections)
+	defer stopStartupCancellation()
+	config.ConnConfig.DialFunc = ownedDialer(connections, config.ConnConfig.DialFunc)
+	config.ConnConfig.LookupFunc = ownedLookup(connections, config.ConnConfig.LookupFunc)
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
+		cancelConnections()
 		return nil, fmt.Errorf("create connection pool: %w", err)
 	}
 
-	if err := pool.Ping(ctx); err != nil {
+	err = pool.Ping(ctx)
+	stopStartupCancellation()
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		cancelConnections()
 		pool.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
-	return &Store{pool: pool}, nil
+	return &Store{pool: pool, cancelConnections: cancelConnections}, nil
 }
 
 func (s *Store) Close() {
+	// Interrupt dials, handshakes and socket I/O before waiting for the pool.
+	// The application calls Close only after draining HTTP requests.
+	s.cancelConnections()
 	s.pool.Close()
 }
 
@@ -126,6 +145,9 @@ func parsePostgresPoolConfig(connString string) (*pgxpool.Config, error) {
 	// pgxpool starts a ticker with this period; non-positive values panic.
 	if config.HealthCheckPeriod <= 0 {
 		return nil, fmt.Errorf("pool_health_check_period must be a positive duration")
+	}
+	if config.ConnConfig.ConnectTimeout <= 0 {
+		config.ConnConfig.ConnectTimeout = 5 * time.Second
 	}
 	return config, nil
 }
