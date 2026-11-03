@@ -18,13 +18,16 @@ import (
 )
 
 func Run(logger *slog.Logger) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return run(ctx, logger)
+}
+
+func run(ctx context.Context, logger *slog.Logger) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	if err := postgres.Migrate(ctx, "file://migrations", cfg.DatabaseURL); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
