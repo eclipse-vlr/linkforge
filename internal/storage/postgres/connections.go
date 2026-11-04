@@ -2,62 +2,45 @@ package postgres
 
 import (
 	"context"
-	"net"
-	"sync"
+
+	"github.com/jackc/pgx/v5"
 )
 
-// Name resolution happens before DialFunc in pgx and needs the same lifetime.
-func ownedLookup(lifetime context.Context, lookup func(context.Context, string) ([]string, error)) func(context.Context, string) ([]string, error) {
-	return func(ctx context.Context, host string) ([]string, error) {
-		if err := lifetime.Err(); err != nil {
-			return nil, err
-		}
-		lookupCtx, cancel := context.WithCancel(ctx)
-		stop := context.AfterFunc(lifetime, cancel)
-		defer stop()
-		defer cancel()
-		return lookup(lookupCtx, host)
-	}
+// connectionLifecycle limits only ConnectConfig, including DNS, dial and
+// authentication. CancelRequest uses pgconn's independent bounded cleanup
+// context and the original dialer, even after the store stops constructors.
+type connectionLifecycle struct {
+	lifetime context.Context
 }
 
-// ownedDialer makes even background pool work stop when the store closes.
-func ownedDialer(lifetime context.Context, dial func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
-	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		if err := lifetime.Err(); err != nil {
-			return nil, err
-		}
-		dialCtx, cancel := context.WithCancel(ctx)
-		stop := context.AfterFunc(lifetime, cancel)
-		conn, err := dial(dialCtx, network, address)
-		stop()
+type connectionCleanupKey struct{}
+
+func (t *connectionLifecycle) TraceConnectStart(ctx context.Context, _ pgx.TraceConnectStartData) context.Context {
+	connecting, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	stop := context.AfterFunc(t.lifetime, func() {
+		defer close(done)
 		cancel()
-		if err != nil {
-			return nil, err
-		}
-		owned := &ownedConnection{Conn: conn, closed: make(chan struct{})}
-		owned.stop = context.AfterFunc(lifetime, func() {
-			defer close(owned.closed)
-			_ = conn.Close()
-		})
-		return owned, nil
-	}
-}
-
-type ownedConnection struct {
-	net.Conn
-	stop      func() bool
-	closed    chan struct{}
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func (c *ownedConnection) Close() error {
-	c.closeOnce.Do(func() {
-		if !c.stop() {
-			// Join a running cancellation callback before returning socket ownership.
-			<-c.closed
-		}
-		c.closeErr = c.Conn.Close()
 	})
-	return c.closeErr
+	if t.lifetime.Err() != nil {
+		cancel()
+	}
+	cleanup := func() {
+		if !stop() {
+			<-done
+		}
+		cancel()
+	}
+	return context.WithValue(connecting, connectionCleanupKey{}, cleanup)
 }
+
+func (*connectionLifecycle) TraceConnectEnd(ctx context.Context, _ pgx.TraceConnectEndData) {
+	ctx.Value(connectionCleanupKey{}).(func())()
+}
+
+// ConnConfig.Tracer accepts a QueryTracer; query contexts stay unchanged.
+func (*connectionLifecycle) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+
+func (*connectionLifecycle) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
