@@ -30,8 +30,7 @@ func NewStore(
 	connections, cancelConnections := context.WithCancel(context.Background())
 	stopStartupCancellation := context.AfterFunc(ctx, cancelConnections)
 	defer stopStartupCancellation()
-	config.ConnConfig.DialFunc = ownedDialer(connections, config.ConnConfig.DialFunc)
-	config.ConnConfig.LookupFunc = ownedLookup(connections, config.ConnConfig.LookupFunc)
+	config.ConnConfig.Tracer = &connectionLifecycle{lifetime: connections}
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
@@ -54,7 +53,8 @@ func NewStore(
 }
 
 func (s *Store) Close() {
-	// Interrupt dials, handshakes and socket I/O before waiting for the pool.
+	// Stop only connection construction. The pool must still deliver SQL cancel
+	// requests and join pgx cleanup for established connections.
 	// The application calls Close only after draining HTTP requests.
 	s.cancelConnections()
 	s.pool.Close()
