@@ -49,6 +49,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Check Compose shutdown grace period
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+
+          config = json.loads(subprocess.check_output(["docker", "compose", "config", "--format", "json"]))
+          grace_period = config["services"]["api"].get("stop_grace_period")
+          if grace_period != "30s":
+              raise SystemExit(f"Expected api.stop_grace_period to be 30s, got {grace_period!r}")
+          PY
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
