@@ -20,8 +20,8 @@ go run ./cmd/loadtest -base http://127.0.0.1:8080 -requests 500 -workers 10 -out
 
 | Поле | Что означает |
 |---|---|
-| `successful_redirects` | Сколько раз получен ожидаемый ответ `302` |
-| `unexpected_responses`, `network_errors` | Другие HTTP-ответы и сетевые ошибки |
+| `successful_redirects` | Ответы `302` с единственным `Location`, совпадающим с адресом тестовой ссылки |
+| `unexpected_responses`, `network_errors` | Ответы с неверным статусом или `Location`, а также сетевые ошибки |
 | `requests_per_second` | Среднее число запросов в секунду |
 | `p50_milliseconds`, `p95_milliseconds`, `p99_milliseconds` | Время, за которое уложились 50%, 95% и 99% запросов |
 
