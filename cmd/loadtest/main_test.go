@@ -59,7 +59,7 @@ func TestLoadtestAPIKeyAndRedirects(t *testing.T) {
 					if r.Header.Get("X-API-Key") != "" {
 						unexpected.Add(1)
 					}
-					http.Redirect(w, r, "/must-not-follow", http.StatusFound)
+					http.Redirect(w, r, "https://example.com/load-test", http.StatusFound)
 				default:
 					unexpected.Add(1)
 					http.NotFound(w, r)
@@ -77,6 +77,50 @@ func TestLoadtestAPIKeyAndRedirects(t *testing.T) {
 			if result.SuccessfulRedirects != 5 || result.NetworkErrors != 0 ||
 				result.UnexpectedResponses != 0 || redirects.Load() != 5 || unexpected.Load() != 0 {
 				t.Fatalf("incorrect load test: %+v, redirects=%d unexpected=%d", result, redirects.Load(), unexpected.Load())
+			}
+		})
+	}
+}
+
+func TestLoadtestRejectsInvalidLocation(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		locations []string
+	}{
+		{name: "missing"},
+		{name: "wrong target", locations: []string{"/wrong-target"}},
+		{name: "multiple values", locations: []string{"https://example.com/load-test", "/wrong-target"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CREATE_LINK_API_KEY", "")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/links":
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write([]byte(`{"code":"abc12345"}`))
+				case r.Method == http.MethodGet && r.URL.Path == "/abc12345":
+					for _, location := range tt.locations {
+						w.Header().Add("Location", location)
+					}
+					w.WriteHeader(http.StatusFound)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			output, err := runLoadtest(t, server.URL)
+			exit, ok := err.(*exec.ExitError)
+			if !ok || exit.ExitCode() != 1 {
+				t.Fatalf("want exit code 1, got %v\n%s", err, output)
+			}
+			var result report
+			if err := json.NewDecoder(strings.NewReader(string(output))).Decode(&result); err != nil {
+				t.Fatalf("invalid report: %v\n%s", err, output)
+			}
+			if result.SuccessfulRedirects != 0 || result.UnexpectedResponses != 5 ||
+				result.NetworkErrors != 0 || result.HTTPStatuses[http.StatusFound] != 5 {
+				t.Fatalf("incorrect report: %+v", result)
 			}
 		})
 	}
