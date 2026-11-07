@@ -16,7 +16,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    stop_grace_period: 15s
+    stop_grace_period: 30s
 
   db:
     image: postgres:17-alpine
