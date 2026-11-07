@@ -20,12 +20,15 @@ import (
 	"time"
 )
 
+const targetURL = "https://example.com/load-test"
+
 type createResponse struct {
 	Code string `json:"code"`
 }
 type measurement struct {
 	Milliseconds float64
 	Status       int
+	LocationOK   bool
 	Err          error
 }
 type report struct {
@@ -72,7 +75,7 @@ func main() {
 		Transport: tr, Timeout: 5 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	body := bytes.NewBufferString("{\"url\":\"https://example.com/load-test\"}")
+	body := bytes.NewBufferString(`{"url":"` + targetURL + `"}`)
 	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/links", body)
 	if err != nil {
 		fail("create test link request: " + err.Error())
@@ -108,6 +111,8 @@ func main() {
 				m := measurement{Err: err}
 				if err == nil {
 					m.Status = r.StatusCode
+					locations := r.Header.Values("Location")
+					m.LocationOK = len(locations) == 1 && locations[0] == targetURL
 					_, readErr := io.Copy(io.Discard, io.LimitReader(r.Body, 4096))
 					r.Body.Close()
 					if readErr != nil {
@@ -137,7 +142,7 @@ func main() {
 			continue
 		}
 		result.HTTPStatuses[m.Status]++
-		if m.Status == http.StatusFound {
+		if m.Status == http.StatusFound && m.LocationOK {
 			result.SuccessfulRedirects++
 			timings = append(timings, m.Milliseconds)
 		} else {
