@@ -6,8 +6,8 @@ on:
       version:
         description: Версия выпуска
         type: choice
-        options: [v0.1.4]
-        default: v0.1.4
+        options: [v0.1.5]
+        default: v0.1.5
         required: true
 
 permissions:
