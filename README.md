@@ -92,7 +92,7 @@ go vet ./...
 
 Код разделён по ответственности: `cmd/api` запускает приложение, `internal/app` управляет конфигурацией и остановкой, `internal/link` содержит логику ссылок, `internal/httpapi` — HTTP, `internal/storage` — PostgreSQL и Redis.
 
-Для миграций используется [форк golang-migrate](https://github.com/eclipse-vlr/golang-migrate/tree/fix/migration-resource-cleanup) с исправлением очистки ресурсов при ошибке. Точная ревизия закреплена в `go.mod`.
+Для миграций используется [форк golang-migrate](https://github.com/eclipse-vlr/golang-migrate/tree/220f6d3de288670889195623ea10cd363173891d) с исправлением очистки ресурсов при ошибке. Точная ревизия закреплена в `go.mod`.
 
 Лимитер пока работает в памяти одного экземпляра, статистика публичная. Compose настроен для локальной разработки; для хостинга потребуются отдельные секреты и настройки доступа.
 
